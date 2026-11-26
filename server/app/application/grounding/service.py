@@ -15,7 +15,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from app.application.text_util import complete_sentences, lexical_overlap, quote_at_boundary
+from app.application.text_util import (
+    complete_sentences,
+    lexical_overlap,
+    quote_at_boundary,
+    strip_think_blocks,
+)
 
 
 @dataclass
@@ -90,7 +95,8 @@ class GroundingService:
 
         title = top.get("document_title") or top["document_id"]
         chunk_text = complete_sentences(str(top.get("text") or ""), max_chars=900)
-        draft_clean = (draft or "").strip()
+        # Strip CoT wrappers even if a Fake/bypass LLM skipped HttpLLMClient.complete().
+        draft_clean = strip_think_blocks(draft or "")
         # Prefer LLM draft only when it overlaps the supporting chunk (grounded).
         if draft_clean and lexical_overlap(draft_clean, str(top.get("text") or "")) >= 0.15:
             answer = complete_sentences(draft_clean, max_chars=900)

@@ -1,6 +1,6 @@
 """
 ANCHOR: app.application.text_util
-PURPOSE: Shared text helpers — sentence-safe truncate, lexical overlap.
+PURPOSE: Shared text helpers — sentence-safe truncate, lexical overlap, CoT strip.
 Dependencies: re
 """
 
@@ -10,6 +10,17 @@ import re
 
 _TOKEN_RE = re.compile(r"[^\W_]+(?:-[^\W_]+)*", re.UNICODE)
 _SENT_END_RE = re.compile(r"(?<=[.!?…])\s+|(?<=\.)\s*(?=\*\*\d)")
+# Common CoT wrappers; also drop unclosed <think>… / <thinking>… tails.
+_THINK_RE = re.compile(
+    r"<think>.*?</think>|<thinking>.*?</thinking>|"
+    r"<think>.*$|<thinking>.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_think_blocks(text: str) -> str:
+    """Remove model chain-of-thought wrappers from user-facing / persisted text."""
+    return _THINK_RE.sub("", text or "").strip()
 
 
 def tokenize(text: str) -> list[str]:

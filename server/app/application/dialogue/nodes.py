@@ -24,6 +24,7 @@ from app.application.dialogue.specificity import prefer_specific_label
 from app.application.dialogue.state import DialogueState
 from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
+from app.application.text_util import strip_think_blocks
 
 logger = logging.getLogger(__name__)
 
@@ -141,7 +142,7 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             temperature=0.2,
         )
         clarify_ms = round((time.perf_counter() - t0) * 1000, 2)
-        text = (text or "").strip() or (
+        text = strip_think_blocks(text or "") or (
             "Уточните, пожалуйста, тему и что именно нужно узнать."
         )
         return {
@@ -197,6 +198,8 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
                 ),
             )
             complete_ms = round((time.perf_counter() - t0) * 1000, 2)
+            # Fake LLM ports may skip HttpLLMClient; strip before UNSUPPORTED / ground.
+            draft = strip_think_blocks(draft or "") or None
             if draft and "UNSUPPORTED" in draft.upper() and len(draft.strip()) < 40:
                 draft = None
         result = deps.grounding.ground(

@@ -10,8 +10,36 @@ from app.application.text_util import (
     complete_sentences,
     lexical_overlap,
     quote_at_boundary,
+    strip_think_blocks,
     truncate_at_sentence,
 )
+
+
+def test_strip_think_blocks_closed() -> None:
+    raw = (
+        "<think>\nReasoning about risks in English.\n</think>\n"
+        "За планирование рисков отвечает РП."
+    )
+    assert strip_think_blocks(raw) == "За планирование рисков отвечает РП."
+
+
+def test_strip_think_blocks_no_think() -> None:
+    clean = "За подтверждение сроков отвечает АМ."
+    assert strip_think_blocks(clean) == clean
+
+
+def test_strip_think_blocks_unclosed() -> None:
+    raw = "<think>still reasoning without a close tag\nи хвост"
+    assert strip_think_blocks(raw) == ""
+
+
+def test_strip_think_blocks_think_then_answer() -> None:
+    raw = (
+        "<thinking>step one</thinking>\n"
+        "<think>step two</think>\n\n"
+        "Ответ: сроки подтверждает менеджер проекта."
+    )
+    assert strip_think_blocks(raw) == "Ответ: сроки подтверждает менеджер проекта."
 
 
 def test_truncate_at_sentence_avoids_mid_thought() -> None:

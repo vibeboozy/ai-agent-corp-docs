@@ -62,3 +62,30 @@ def test_ground_uses_draft_when_overlapping_chunk() -> None:
     assert result.ok
     assert "Менеджер по поставке" in (result.answer_text or "")
     assert not (result.answer_text or "").endswith("Аккаунт-менедже")  # complete
+
+
+def test_ground_strips_think_from_draft_before_answer() -> None:
+    """First-generate path: CoT in draft must not leak into answer_text."""
+    svc = GroundingService()
+    chunk = "За планирование рисков отвечает руководитель проекта."
+    candidates = [
+        {
+            "document_id": "d1",
+            "chunk_id": "c1",
+            "text": chunk,
+            "score": 0.95,
+            "document_title": "Регламент рисков",
+        }
+    ]
+    dirty = (
+        "<think>\nThe user asks who plans risks; cite the regulation.\n</think>\n"
+        f"{chunk}"
+    )
+    result = svc.ground(
+        candidates=candidates, draft=dirty, query="Кто планирует риски?"
+    )
+    assert result.ok
+    answer = result.answer_text or ""
+    assert "<think>" not in answer.lower()
+    assert "</think>" not in answer.lower()
+    assert "руководитель проекта" in answer
