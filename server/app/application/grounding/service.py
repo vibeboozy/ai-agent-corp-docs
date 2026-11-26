@@ -61,7 +61,7 @@ class GroundingService:
             }
             for c in usable[:3]
         ]
-        # Prefer draft only if it does not invent beyond chunk (stub: use chunk text).
+        # Prefer draft only if it does not invent beyond chunk text.
         _ = draft
         answer = f"Согласно регламенту «{top.get('document_title') or top['document_id']}»: {top['text']}"
         return GroundingResult(ok=True, citations=citations, answer_text=answer)

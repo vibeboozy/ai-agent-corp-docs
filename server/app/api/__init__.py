@@ -7,5 +7,5 @@ DO:
 - Map HTTP status per coding_standards
 DONT:
 - Put grounding/dialogue policy in routers
-- Import Stub* or Http* adapters directly
+- Import Http* / Qdrant* adapters directly
 """

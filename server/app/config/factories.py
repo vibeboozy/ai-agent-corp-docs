@@ -1,11 +1,11 @@
 """
 ANCHOR: app.config.factories
-PURPOSE: DI factory: build port implementations from Settings (stubs by default).
-Dependencies: Settings; adapters.*; adapters.stubs.*
+PURPOSE: DI factory: build real port implementations from Settings.
+Dependencies: Settings; adapters.* (Http*/Qdrant/SqlAlchemy/Soffice/Email)
 DO:
-- Construction of Stub*/Http* only here (CS-STUB-04)
+- Construction of real adapters only here (CS-DI-01)
 DONT:
-- Let application services import Stub* or Http*
+- Let application services import Http* / Qdrant* directly
 """
 
 from __future__ import annotations
@@ -14,16 +14,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-from app.adapters.stubs import (
-    StubDoclingClient,
-    StubEmbeddingsClient,
-    StubEscalationNotifier,
-    StubLibreOffice,
-    StubLLMClient,
-    StubPersistence,
-    StubVectorStore,
-)
-from app.adapters.stubs.fixtures import SHARED_FIXTURE_KB
 from app.application.appeals.service import AppealsService
 from app.application.connectivity.service import ConnectivityService
 from app.application.dialogue.nodes import DialogueDeps
@@ -57,8 +47,6 @@ class Container:
 
 
 def _build_llm(settings: Settings) -> Any:
-    if settings.stub_for("llm"):
-        return StubLLMClient()
     from app.adapters.llm.http import HttpLLMClient
 
     return HttpLLMClient(
@@ -68,13 +56,12 @@ def _build_llm(settings: Settings) -> Any:
         timeout_s=settings.llm_timeout_s,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
+        reasoning_tokens=settings.llm_reasoning_tokens,
         allow_hosts=settings.egress_hosts(),
     )
 
 
 def _build_embeddings(settings: Settings) -> Any:
-    if settings.stub_for("embeddings"):
-        return StubEmbeddingsClient(dim=min(32, settings.embeddings_dense_dim))
     from app.adapters.embeddings.http import HttpEmbeddingsClient
 
     return HttpEmbeddingsClient(
@@ -83,13 +70,12 @@ def _build_embeddings(settings: Settings) -> Any:
         dense_model=settings.embeddings_dense_model,
         sparse_model=settings.embeddings_sparse_model,
         timeout_s=settings.embeddings_timeout_s,
+        batch_size=settings.embeddings_batch_size,
         allow_hosts=settings.egress_hosts(),
     )
 
 
 def _build_vectorstore(settings: Settings) -> Any:
-    if settings.stub_for("vectorstore"):
-        return StubVectorStore(kb=SHARED_FIXTURE_KB)
     from app.adapters.vectorstore.qdrant import QdrantVectorStore
 
     return QdrantVectorStore(
@@ -103,21 +89,26 @@ def _build_vectorstore(settings: Settings) -> Any:
 
 
 def _build_docling(settings: Settings) -> Any:
-    if settings.stub_for("docling"):
-        return StubDoclingClient()
     from app.adapters.docling.http import HttpDoclingClient
 
     return HttpDoclingClient(
         base_url=settings.docling_base_url,
         api_key=settings.docling_api_key,
         timeout_s=settings.docling_timeout_s,
+        connect_timeout_s=settings.docling_connect_timeout_s,
+        concurrency=settings.docling_concurrency,
+        split_pages=settings.docling_split_pages,
+        ocr_langs=settings.docling_ocr_langs,
+        chunker=settings.docling_chunker,
+        chunk_tokenizer=settings.docling_chunk_tokenizer,
+        chunk_max_tokens=settings.docling_chunk_max_tokens,
+        chunk_overlap_tokens=settings.docling_chunk_overlap_tokens,
+        chunk_min_tokens=settings.docling_chunk_min_tokens,
         allow_hosts=settings.egress_hosts(),
     )
 
 
 def _build_libreoffice(settings: Settings) -> Any:
-    if settings.stub_for("libreoffice"):
-        return StubLibreOffice()
     from app.adapters.libreoffice.soffice import SofficeLibreOffice
 
     return SofficeLibreOffice(
@@ -127,8 +118,6 @@ def _build_libreoffice(settings: Settings) -> Any:
 
 
 def _build_escalation(settings: Settings) -> Any:
-    if settings.stub_for("escalation"):
-        return StubEscalationNotifier()
     from app.adapters.escalation.email import EmailEscalationNotifier
 
     return EmailEscalationNotifier(
@@ -138,12 +127,10 @@ def _build_escalation(settings: Settings) -> Any:
 
 
 def _build_persistence(settings: Settings) -> Any:
-    if settings.stub_for("persistence"):
-        return StubPersistence()
     from app.adapters.persistence.sqlalchemy.adapter import SqlAlchemyPersistence
 
     if not settings.database_url:
-        raise RuntimeError("DATABASE_URL required when PERSISTENCE_USE_STUB=false")
+        raise RuntimeError("DATABASE_URL is required")
     return SqlAlchemyPersistence(
         database_url=settings.database_url,
         pool_size=settings.database_pool_size,
@@ -154,7 +141,7 @@ def _build_persistence(settings: Settings) -> Any:
 
 
 def build_container(settings: Settings | None = None) -> Container:
-    """Select stub or real adapters from settings; wire application services."""
+    """Wire real adapters and application services from settings."""
     settings = settings or get_settings()
     llm = _build_llm(settings)
     embeddings = _build_embeddings(settings)
@@ -169,6 +156,13 @@ def build_container(settings: Settings | None = None) -> Container:
         vectorstore=vectorstore,
         prefetch=settings.retrieval_prefetch,
         prefer_latest=settings.retrieval_prefer_latest,
+        rerank_mode=settings.rerank_mode,
+        rerank_candidates=settings.rerank_candidates,
+        rerank_top_k=settings.rerank_top_k,
+        rerank_max_per_doc=settings.rerank_max_per_doc,
+        rerank_min_score=settings.rerank_min_score,
+        llm=llm,
+        rerank_llm_model=settings.rerank_llm_model,
     )
     grounding = GroundingService(
         min_citations=settings.grounding_min_citations,
@@ -206,16 +200,9 @@ def build_container(settings: Settings | None = None) -> Container:
         vectorstore=vectorstore,
         docling=docling,
         persistence=persistence,
-        stub_flags={
-            "llm": settings.stub_for("llm"),
-            "embeddings": settings.stub_for("embeddings"),
-            "vectorstore": settings.stub_for("vectorstore"),
-            "docling": settings.stub_for("docling"),
-            "persistence": settings.stub_for("persistence"),
-        },
     )
 
-    # Keep libreoffice constructed for DI completeness (used by future ingest CLI).
+    # Keep libreoffice constructed for DI completeness (used by ingest CLI).
     _ = libreoffice
 
     return Container(

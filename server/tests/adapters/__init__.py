@@ -1,5 +1,4 @@
 """
 ANCHOR: tests.adapters
-PURPOSE: Test stubs for adapters layer.
-Dependencies: pytest
+PURPOSE: Adapter unit tests (mocked HTTP) and live-gated connectivity.
 """

@@ -1,12 +1,12 @@
 """
 ANCHOR: app.config.settings
-PURPOSE: Load env into Settings; stub flags and connection placeholders.
+PURPOSE: Load env into Settings; connection endpoints for real adapters.
 Dependencies: pydantic_settings; .env.example keys
 DO:
-- Default stubs on
+- Require real provider env for runtime (LLM/embeddings/Qdrant/Docling/Postgres)
 - Document keys in .env.example
 DONT:
-- Require live secrets to import Settings
+- Invent offline/fake provider switches
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings — mirrors server/.env.example (stubs on by default)."""
+    """Application settings — mirrors server/.env.example (real clients only)."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -26,16 +26,6 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
-
-    # --- stubs ---
-    use_stubs: bool = Field(default=True, alias="USE_STUBS")
-    llm_use_stub: bool = Field(default=True, alias="LLM_USE_STUB")
-    embeddings_use_stub: bool = Field(default=True, alias="EMBEDDINGS_USE_STUB")
-    qdrant_use_stub: bool = Field(default=True, alias="QDRANT_USE_STUB")
-    docling_use_stub: bool = Field(default=True, alias="DOCLING_USE_STUB")
-    libreoffice_use_stub: bool = Field(default=True, alias="LIBREOFFICE_USE_STUB")
-    escalation_use_stub: bool = Field(default=True, alias="ESCALATION_USE_STUB")
-    persistence_use_stub: bool = Field(default=True, alias="PERSISTENCE_USE_STUB")
 
     # --- app ---
     app_env: str = Field(default="development", alias="APP_ENV")
@@ -46,12 +36,12 @@ class Settings(BaseSettings):
     auth_officer_token: str | None = Field(default=None, alias="AUTH_OFFICER_TOKEN")
 
     # --- docs corpus (local-only; not committed) ---
-    # Prefer DOCS_CORPUS_PATH; DOCS_DIR accepted as alias via model validator below.
+    # Prefer DOCS_CORPUS_PATH; DOCS_DIR accepted as alias via resolved_docs_corpus_path.
     docs_corpus_path: str = Field(default="docs", alias="DOCS_CORPUS_PATH")
     docs_dir: str | None = Field(default=None, alias="DOCS_DIR")
 
     # --- persistence ---
-    database_url: str | None = Field(
+    database_url: str = Field(
         default="postgresql+asyncpg://rag:rag@127.0.0.1:5432/rag_agent",
         alias="DATABASE_URL",
     )
@@ -66,6 +56,7 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="gpt-4.1-mini", alias="LLM_MODEL")
     llm_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
     llm_max_tokens: int = Field(default=1500, alias="LLM_MAX_TOKENS")
+    llm_reasoning_tokens: int = Field(default=1024, alias="LLM_REASONING_TOKENS")
     llm_timeout_s: float = Field(default=180.0, alias="LLM_TIMEOUT_S")
 
     # --- embeddings ---
@@ -92,10 +83,31 @@ class Settings(BaseSettings):
     )
     docling_api_key: str | None = Field(default=None, alias="DOCLING_API_KEY")
     docling_timeout_s: float = Field(default=300.0, alias="DOCLING_TIMEOUT_S")
+    docling_connect_timeout_s: float = Field(default=30.0, alias="DOCLING_CONNECT_TIMEOUT_S")
+    docling_concurrency: int = Field(default=2, alias="DOCLING_CONCURRENCY")
+    docling_split_pages: bool = Field(default=True, alias="DOCLING_SPLIT_PAGES")
+    docling_ocr_langs: str = Field(default="ru,en", alias="DOCLING_OCR_LANGS")
+    docling_chunker: str = Field(default="HybridChunker", alias="DOCLING_CHUNKER")
+    docling_chunk_tokenizer: str = Field(
+        default="BAAI/bge-m3", alias="DOCLING_CHUNK_TOKENIZER"
+    )
+    docling_chunk_max_tokens: int = Field(default=512, alias="DOCLING_CHUNK_MAX_TOKENS")
+    docling_chunk_overlap_tokens: int = Field(
+        default=64, alias="DOCLING_CHUNK_OVERLAP_TOKENS"
+    )
+    docling_chunk_min_tokens: int = Field(default=32, alias="DOCLING_CHUNK_MIN_TOKENS")
 
     # --- libreoffice ---
     libreoffice_soffice_path: str = Field(default="soffice", alias="LIBREOFFICE_SOFFICE_PATH")
     libreoffice_timeout_s: float = Field(default=120.0, alias="LIBREOFFICE_TIMEOUT_S")
+
+    # --- rerank ---
+    rerank_mode: str = Field(default="none", alias="RERANK_MODE")  # none | llm
+    rerank_llm_model: str | None = Field(default=None, alias="RERANK_LLM_MODEL")
+    rerank_candidates: int = Field(default=20, alias="RERANK_CANDIDATES")
+    rerank_top_k: int = Field(default=5, alias="RERANK_TOP_K")
+    rerank_max_per_doc: int = Field(default=3, alias="RERANK_MAX_PER_DOC")
+    rerank_min_score: float = Field(default=0.0, alias="RERANK_MIN_SCORE")
 
     # --- retrieval / dialogue / grounding ---
     retrieval_prefetch: int = Field(default=50, alias="RETRIEVAL_PREFETCH")
@@ -123,22 +135,6 @@ class Settings(BaseSettings):
     # --- egress ---
     egress_allow_hosts: str | None = Field(default=None, alias="EGRESS_ALLOW_HOSTS")
 
-    def stub_for(self, service: str) -> bool:
-        """Resolve whether a named adapter should use its stub."""
-        if self.use_stubs:
-            return True
-        mapping = {
-            "llm": self.llm_use_stub,
-            "embeddings": self.embeddings_use_stub,
-            "qdrant": self.qdrant_use_stub,
-            "vectorstore": self.qdrant_use_stub,
-            "docling": self.docling_use_stub,
-            "libreoffice": self.libreoffice_use_stub,
-            "escalation": self.escalation_use_stub,
-            "persistence": self.persistence_use_stub,
-        }
-        return mapping.get(service, True)
-
     def resolved_docs_corpus_path(self) -> str:
         """Local corpus directory (gitignored); DOCS_DIR overrides when set."""
         if self.docs_dir:
@@ -157,7 +153,7 @@ def get_settings() -> Settings:
 
 
 def clear_settings_cache() -> None:
-    """Drop Settings cache and DI container so API/CLI see fresh env flags."""
+    """Drop Settings cache and DI container so API/CLI see fresh env."""
     get_settings.cache_clear()
     # Avoid circular import at module load; clear container when available.
     try:

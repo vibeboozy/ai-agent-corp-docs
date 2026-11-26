@@ -1,8 +1,8 @@
 # Project Context — Corporate RAG AI-Agent Server
 
-> Prototype deliverable: rules and architecture only. **Do not implement the server from this document alone without following `dev_plan.xml` phases.** All external AI/infra services are designed behind stubs with a one-config swap to real clients.
+> Prototype deliverable under `server/`. Follow `dev_plan.xml` phases. External AI/infra services use real adapters (LLM, embeddings, Qdrant, Docling, Postgres) wired from Settings.
 >
-> **Working directory:** everything for this product lives under `server/` (this file, `rules/`, `.env.example`, future `app/`). Repo root only points here.
+> **Working directory:** everything for this product lives under `server/` (this file, `rules/`, `.env.example`, `app/`). Repo root only points here.
 
 ## 1. Goals / Non-goals / Acceptance
 
@@ -22,14 +22,14 @@
 
 - Production multi-tenant auth/SSO (placeholder only).
 - Client UI (separate later; parallel to `server/` at repo root when added).
-- Live calls to LLM/embeddings/Qdrant/Docling in default/CI mode.
+- Fake/offline provider adapters (always use real services).
 - Perfect legal compliance certification.
 - Full LangChain RetrievalQA / LCEL-as-primary-RAG (see §2.1).
 
 ### 1.4 Product principles
 
 1. **No hallucination** — unsupported claim → clarify or escalate.
-2. **Stubs-first** — real providers behind adapters; `USE_STUBS` / per-service flags.
+2. **Real adapters only** — LLM/embeddings/Qdrant/Docling/Postgres via ports + DI factories.
 3. **Appeal-centric chat** — conversation = message list on an appeal/ticket.
 4. **Russian regulations domain** — corpus and UX language: Russian; technical identifiers: English.
 
@@ -46,17 +46,17 @@
 | Validation | Pydantic v2 | Settings via `pydantic-settings` |
 | HTTP client | httpx (async) | LLM, embeddings, Docling, email webhooks |
 | Vector DB | qdrant-client | Dense + sparse (bge-m3); collection alias + blue/green `*_v1`/`*_v2` |
-| Doc convert | Docling (HTTP) + LibreOffice/`soffice` for docx when needed | Stub by default |
-| Persistence | **PostgreSQL** via SQLAlchemy 2.x async + asyncpg | Appeals, messages, escalations, audit, stats; must survive restarts. StubPersistence for unit tests; optional SQLite only as emergency local fallback |
+| Doc convert | Docling (HTTP) + LibreOffice/`soffice` for docx when needed | Live HTTP / soffice |
+| Persistence | **PostgreSQL** via SQLAlchemy 2.x async + asyncpg | Appeals, messages, escalations, audit, stats; must survive restarts. Optional SQLite only as emergency local fallback |
 | Logging | structlog or stdlib `logging` + JSON formatter | Correlation IDs |
-| Tests | pytest + pytest-asyncio + httpx ASGITransport | Stub CI by default; live gated by `RUN_LIVE_*` |
+| Tests | pytest + pytest-asyncio + httpx ASGITransport | Unit/mocked HTTP in CI; live gated by `RUN_LIVE_*` |
 | Packaging | `pyproject.toml`, ruff, mypy (strict-ish) | See `rules/coding_standards.xml` |
 
 ### 2.1 LangGraph / LangChain decision
 
 | Technology | Decision | Rationale |
 |------------|----------|-----------|
-| **LangGraph** | **YES — adopt** | Success criteria map cleanly to a typed state graph: underspecified → clarify loop; retrieve → ground → answer **or** escalate; officer path feeds learning. Conditional edges keep “no invention” enforceable in code, not prompt hope. Checkpointing can align with appeal/message persistence later. Modern versions; stubs inject the same node callables. |
+| **LangGraph** | **YES — adopt** | Success criteria map cleanly to a typed state graph: underspecified → clarify loop; retrieve → ground → answer **or** escalate; officer path feeds learning. Conditional edges keep “no invention” enforceable in code, not prompt hope. Checkpointing can align with appeal/message persistence later. Modern versions; DI injects the same node callables. |
 | **LangChain (full / RAG chains)** | **NO as primary stack** | Hybrid dense+sparse bge-m3, Qdrant alias blue/green, Docling HTTP, and strict citation grounding are first-class **our** ports. LangChain `RetrievalQA` / vectorstore wrappers add coupling and version churn without improving groundedness guarantees. |
 | **langchain-core** | **Optional, thin** | Allowed for message schemas / runnable interfaces if it reduces boilerplate. Application services and adapters must not depend on LangChain vectorstores, document loaders, or remote tool ecosystems. |
 
@@ -95,8 +95,7 @@
         docling/
         libreoffice/
         escalation/
-        persistence/        # Postgres SQLAlchemy + StubPersistence
-        stubs/
+        persistence/        # Postgres SQLAlchemy
       config/
       logging/
     docs/                   # LOCAL ONLY — RAG corpus (docx); path via DOCS_CORPUS_PATH / DOCS_DIR; gitignored
@@ -124,13 +123,12 @@ API (FastAPI routers)
       → adapters (ports: LLM, Embeddings, VectorStore, Docling, Email, Persistence)
 ```
 
-### 3.1 Stub vs real provider pattern
+### 3.1 Real provider pattern
 
-- Each port has a Protocol/ABC and two implementations: `StubX` and `HttpX` / `QdrantX` / `SqlAlchemyPersistence`.
-- Factory in `config` / DI selects by env: `USE_STUBS=true` (global) or `LLM_USE_STUB=true`, `PERSISTENCE_USE_STUB=true`, etc.
-- LangGraph nodes receive ports via DI — same graph for stub and live.
-- Switching to real services = config change only; no call-site edits.
-- Stubs return deterministic fixtures suitable for tests and demo scenarios.
+- Each port has a Protocol/ABC and one production implementation: `HttpX` / `QdrantX` / `SqlAlchemyPersistence` / `SofficeLibreOffice` / `EmailEscalationNotifier`.
+- Factory in `config` / DI always constructs real adapters from Settings (URLs, keys, timeouts).
+- LangGraph nodes receive ports via DI — topology is independent of concrete clients.
+- Unit tests mock ports or HTTP at the adapter boundary; product flows need live services (`RUN_LIVE_*`).
 
 ### 3.2 Module map (see also `semantic_graph.xml`)
 
@@ -145,7 +143,7 @@ API (FastAPI routers)
 | `learning` | Officer canonical answer → KB update |
 | `quality_escalation` | Ticket + email to quality service |
 | `persistence` | PostgreSQL: appeals, messages, escalations, audit, stats inputs |
-| `adapters` / `stubs` | External I/O |
+| `adapters` | External I/O (live clients) |
 | `config` / `logging` | Settings, structured logs |
 
 ### 3.3 PostgreSQL persistence (required for durable history)
@@ -159,11 +157,10 @@ API (FastAPI routers)
 | Migrations | Alembic |
 | Port | `AppealRepository` / `Persistence` Protocol |
 | Real adapter | `SqlAlchemyPersistence` (or split repos under `adapters/persistence/`) |
-| Stub | `StubPersistence` — in-memory; **not** for demo durability |
-| CI unit tests | StubPersistence or ephemeral Postgres via `RUN_LIVE_POSTGRES=1` |
+| CI unit tests | Mocked ports; Postgres via `RUN_LIVE_POSTGRES=1` |
 | Fallback | `sqlite+aiosqlite` only if explicitly allowed for laptop smoke; production/prototype target remains Postgres |
 
-**Env:** `DATABASE_URL`, pool knobs (`DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW`, `DATABASE_POOL_TIMEOUT_S`), `PERSISTENCE_USE_STUB`, optional `DATABASE_ECHO`. See `.env.example`.
+**Env:** `DATABASE_URL`, pool knobs (`DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW`, `DATABASE_POOL_TIMEOUT_S`), optional `DATABASE_ECHO`. See `.env.example`.
 
 **Tables (logical):** `appeals`, `messages` (FK appeal, ordered history), `escalations`, `audit_events`, `documents` / `chunk_refs` metadata, `canonical_answers` / learning jobs. Stats endpoints aggregate from these tables — not from volatile memory.
 
@@ -272,10 +269,12 @@ officer-reply (canonical)
 
 ## 7. Observability
 
-- **Request logging:** method, path, status, latency, `request_id`, `appeal_id` when present.
-- **Appeal audit trail:** status transitions, graph node outcomes (clarify / answer / escalate), retrieval hit counts, officer actions — durable in persistence, not only logs.
+- **Request logging:** method, path, status, latency, `request_id`, `appeal_id` when present (stdout; see `LOG_*`).
+- **Appeal audit trail** (`audit_events` JSONB payload): durable in Postgres.
+  - `dialogue_turn`: `outcome`, `node_trace`, `specificity`, `clarify_reason` / `escalation_reason`, `chunk_ids` + citation scores, `rerank.mode` + `rerank.scores`, `latency_ms` (`llm_assess_ms`, `llm_complete_ms`, `retrieval_total_ms` / `embed_ms` / `search_ms` / `rerank_ms`, `turn_total_ms`), `hit_count`.
+  - Also: status transitions, `escalation_created` (with `reason`), officer/learning/ingest events.
 - **LOG_*** env for level, JSON format, redaction flags.
-- **CACHE_*** for optional response/embedding cache (stub-friendly; disable across learning updates as needed).
+- **CACHE_*** for optional response/embedding cache (disable across learning updates as needed).
 
 Never log full secrets or unnecessary PII (see `rules/security_rules.xml`).
 
@@ -285,18 +284,17 @@ Never log full secrets or unnecessary PII (see `rules/security_rules.xml`).
 
 Documented in `.env.example` (this directory). Groups:
 
-- **PostgreSQL** — `DATABASE_URL` (`postgresql+asyncpg://...`), pool settings, `PERSISTENCE_USE_STUB`
+- **PostgreSQL** — `DATABASE_URL` (`postgresql+asyncpg://...`), pool settings
 - **LLM** — OpenAI-compatible chat completions (`LLM_BASE_URL` without `/chat/completions`)
 - **Embeddings** — dense + sparse bge-m3
-- **Qdrant** — URL, key, collection alias, timeouts, upsert batch
-- **Docling** — base URL, OCR, chunker, concurrency
-- **Rerank / Retrieval** — mode, candidates, prefetch, prefer latest
+- **Qdrant** — URL, key, collection alias, timeouts, upsert batch (local `:6333` vs Cloud `:443`)
+- **Docling** — base URL, OCR langs, split pages, HybridChunker max/overlap/min tokens, concurrency/timeouts
+- **Rerank / Retrieval** — `RERANK_MODE=none|llm`, candidates, top_k, max_per_doc, min_score; prefetch, prefer latest
 - **Quality** — `QUALITY_SERVICE_EMAIL`, escalation toggles
-- **Stubs** — `USE_STUBS` and per-adapter `*_USE_STUB`
 - **Cache / Log** — operational knobs
 - **Live tests** — `RUN_LIVE_TESTS`, `RUN_LIVE_LLM`, `RUN_LIVE_EMBEDDINGS`, `RUN_LIVE_QDRANT`, `RUN_LIVE_DOCLING`, `RUN_LIVE_POSTGRES`, `RUN_LIVE_E2E`
 
-**CRITICAL:** Default local/CI configuration uses stubs. No live access to LLM/embeddings/Qdrant/Docling required to develop or demo core flows.
+**CRITICAL:** Runtime always uses real providers. Configure URLs/keys in `.env`. Unit tests may mock HTTP; product demos need live infra (`rag-server check`).
 
 ---
 
@@ -306,8 +304,8 @@ Details: `rules/testing_rules.xml`.
 
 | Mode | Flags | What runs |
 |------|-------|-----------|
-| Default CI / local | `USE_STUBS=true`, `RUN_LIVE_*=0` | Unit, contract, stub behavior (grounded / clarify / escalate / learn) |
-| Per-adapter smoke | `USE_STUBS=false`, matching `*_USE_STUB=false`, `RUN_LIVE_<SVC>=1` | Connectivity + one round-trip to that service |
+| Default CI / local | `RUN_LIVE_*=0` | Unit/contract (mocked HTTP); live suites skip |
+| Per-adapter smoke | `RUN_LIVE_<SVC>=1` | Connectivity + one round-trip to that service |
 | Integration | `RUN_LIVE_TESTS=1` | Broader adapter + retrieval checks against real backends |
 | E2E scenarios | `RUN_LIVE_E2E=1` (+ real keys) | Full appeal flows: grounded answer, clarify dialogue, escalation, officer-reply learning |
 
@@ -318,8 +316,8 @@ Live suites must **skip** when flags/secrets are absent — never fail CI for mi
 ## 10. Constraints for agents implementing later
 
 1. Follow `rules/anchor_standards.xml` for every assistant answer.
-2. Follow `rules/coding_standards.xml` for layout, naming (`Stub*` vs real), and LangGraph placement.
-3. Follow `rules/testing_rules.xml` — CI must not call live providers by default.
+2. Follow `rules/coding_standards.xml` for layout, adapter naming, and LangGraph placement.
+3. Follow `rules/testing_rules.xml` — CI must not call live providers unless `RUN_LIVE_*` is set.
 4. Follow `rules/security_rules.xml` for secrets and SSRF.
 5. Prefer extending adapters over scattering HTTP calls in services or LangGraph nodes.
 6. Russian business copy in user-facing messages is OK; code identifiers stay English.
@@ -335,8 +333,8 @@ Live suites must **skip** when flags/secrets are absent — never fail CI for mi
 | `dev_plan.xml` | Phased implementation plan |
 | `rules/coding_standards.xml` | Code style and layout |
 | `rules/security_rules.xml` | Secrets, PII, SSRF |
-| `rules/testing_rules.xml` | Stub + live test policy |
-| `rules/anchor_standards.xml` | Grounding / clarify / escalate / stubs |
+| `rules/testing_rules.xml` | Unit + live test policy |
+| `rules/anchor_standards.xml` | Grounding / clarify / escalate |
 | `.env.example` | All configuration keys (incl. `DOCS_CORPUS_PATH` / `DOCS_DIR`) |
 | `CLIENT_INFO.md` | REST contract for future client AI agent |
 | `README.md` | Index, connectivity `check`, and test command cheat sheet |

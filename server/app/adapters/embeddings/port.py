@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.embeddings.port
-PURPOSE: EmbeddingsClient Protocol/ABC — no Stub prefix (CS-STUB-01).
+PURPOSE: EmbeddingsClient Protocol/ABC for dense/sparse vectors.
 Dependencies: typing.Protocol
 """
 

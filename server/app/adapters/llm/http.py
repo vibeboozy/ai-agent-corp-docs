@@ -2,7 +2,7 @@
 ANCHOR: app.adapters.llm.HttpLLMClient
 PURPOSE: Real HttpLLMClient — OpenAI-compatible chat completions behind flags.
 Dependencies: httpx; Settings
-CRITICAL: Selected only when USE_STUBS=false and matching *_USE_STUB=false.
+CRITICAL: Always used — real OpenAI-compatible chat client.
 DO:
 - Enforce *_TIMEOUT_S on clients
 - Map failures to typed errors without leaking secrets
@@ -63,6 +63,7 @@ class HttpLLMClient:
         timeout_s: float = 180.0,
         temperature: float = 0.2,
         max_tokens: int = 1500,
+        reasoning_tokens: int = 0,
         allow_hosts: set[str] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -71,8 +72,14 @@ class HttpLLMClient:
         self._timeout = timeout_s
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._reasoning_tokens = max(0, int(reasoning_tokens))
         self._allow_hosts = allow_hosts or set()
         self._assert_host_allowed()
+
+    @property
+    def request_max_tokens(self) -> int:
+        """Completion budget sent upstream: LLM_MAX_TOKENS + LLM_REASONING_TOKENS."""
+        return self._max_tokens + self._reasoning_tokens
 
     def _assert_host_allowed(self) -> None:
         if not self._allow_hosts:
@@ -109,7 +116,7 @@ class HttpLLMClient:
         payload = {
             "model": self._model,
             "temperature": self._temperature if temperature is None else temperature,
-            "max_tokens": self._max_tokens,
+            "max_tokens": self.request_max_tokens,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -146,5 +153,5 @@ class HttpLLMClient:
 _: LLMClient = HttpLLMClient(  # type: ignore[assignment]
     base_url="https://example.invalid/v1",
     api_key=None,
-    model="stub",
+    model="protocol-check",
 )

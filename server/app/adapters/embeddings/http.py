@@ -24,6 +24,7 @@ class HttpEmbeddingsClient:
         dense_model: str,
         sparse_model: str,
         timeout_s: float = 120.0,
+        batch_size: int = 32,
         allow_hosts: set[str] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -31,6 +32,7 @@ class HttpEmbeddingsClient:
         self._dense_model = dense_model
         self._sparse_model = sparse_model
         self._timeout = timeout_s
+        self._batch_size = max(1, int(batch_size))
         self._allow_hosts = allow_hosts or set()
         if self._allow_hosts:
             host = (urlparse(self._base_url).hostname or "").lower()
@@ -66,20 +68,26 @@ class HttpEmbeddingsClient:
         return result
 
     async def _embed(self, model: str, texts: list[str]) -> list[Any]:
+        if not texts:
+            return []
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
+        out: list[Any] = []
         try:
             async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base_url}/embeddings",
-                    headers=headers,
-                    json={"model": model, "input": texts},
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                items = sorted(data["data"], key=lambda x: x["index"])
-                return [item["embedding"] for item in items]
+                for start in range(0, len(texts), self._batch_size):
+                    batch = texts[start : start + self._batch_size]
+                    resp = await client.post(
+                        f"{self._base_url}/embeddings",
+                        headers=headers,
+                        json={"model": model, "input": batch},
+                    )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    items = sorted(data["data"], key=lambda x: x["index"])
+                    out.extend(item["embedding"] for item in items)
+            return out
         except httpx.TimeoutException as exc:
             raise UpstreamTimeoutError("Embeddings request timed out") from exc
         except httpx.HTTPError as exc:

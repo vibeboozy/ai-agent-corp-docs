@@ -6,5 +6,5 @@ DO:
 - Own dialogue/grounding/learning policies
 DONT:
 - Import FastAPI routers
-- Import Stub* or Http* concrete adapters
+- Import Http* / Qdrant* concrete adapters
 """

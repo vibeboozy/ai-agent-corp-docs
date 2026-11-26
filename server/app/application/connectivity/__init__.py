@@ -1,6 +1,6 @@
 """
 ANCHOR: app.application.connectivity
-PURPOSE: Dependency connectivity checks for stubs and live adapters.
+PURPOSE: Dependency connectivity checks for live adapters.
 Dependencies: ports via DI container
 """
 

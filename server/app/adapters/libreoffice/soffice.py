@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.libreoffice.soffice
-PURPOSE: Real soffice converter behind LIBREOFFICE_USE_STUB=false.
+PURPOSE: Real soffice converter adapter.
 Dependencies: asyncio subprocess
 """
 

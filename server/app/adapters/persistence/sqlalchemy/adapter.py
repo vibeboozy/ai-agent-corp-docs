@@ -5,7 +5,7 @@ Dependencies: sqlalchemy.ext.asyncio, asyncpg, Settings.DATABASE_URL
 DO:
 - Use alembic migrations in persistence phase
 DONT:
-- Use in-memory stub as demo durability
+- Drop durable history for convenience
 """
 
 from __future__ import annotations
@@ -243,7 +243,12 @@ class SqlAlchemyPersistence:
                 session,
                 appeal_id=appeal_id,
                 event_type="escalation_created",
-                payload={"escalation_id": str(row.id)},
+                payload={
+                    "escalation_id": str(row.id),
+                    "reason": reason,
+                    "channel": channel,
+                    "status": status.value,
+                },
             )
             await session.commit()
             await session.refresh(row)

@@ -26,5 +26,5 @@ async def health_v1() -> dict[str, str]:
 @router.get("/health/dependencies")
 @router.get("/api/v1/health/dependencies")
 async def health_dependencies(container: ContainerDep) -> dict:
-    """Per-adapter connectivity (stub or live). Does not gate process liveness."""
+    """Per-adapter connectivity. Does not gate process liveness."""
     return await container.connectivity.check_report()

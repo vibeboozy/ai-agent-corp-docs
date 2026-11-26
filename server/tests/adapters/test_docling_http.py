@@ -1,7 +1,7 @@
 """
 ANCHOR: tests.adapters.test_docling_http
-PURPOSE: Docling Serve 1.26 /v1/convert/source body shape + stub path still works.
-Dependencies: app.adapters.docling.http; stubs
+PURPOSE: Docling Serve 1.26 /v1/convert/source body shape (mocked HTTP).
+Dependencies: app.adapters.docling.http
 """
 
 from __future__ import annotations
@@ -13,17 +13,6 @@ import httpx
 import pytest
 
 from app.adapters.docling.http import HttpDoclingClient
-from app.adapters.stubs.docling import StubDoclingClient
-from app.config.factories import build_container
-from app.config.settings import Settings
-
-
-@pytest.mark.asyncio
-async def test_stub_docling_still_works_via_factory() -> None:
-    c = build_container(Settings(USE_STUBS=True, DOCLING_USE_STUB=True))
-    assert isinstance(c.docling, StubDoclingClient)
-    out = await c.docling.convert(text="Параграф один.\n\nПараграф два.")
-    assert len(out["chunks"]) >= 2
 
 
 @pytest.mark.asyncio
@@ -74,8 +63,13 @@ async def test_http_docling_posts_v1_file_source(
     assert sources[0]["kind"] == "file"
     assert sources[0]["filename"] == "reg.docx"
     assert sources[0]["base64_string"] == base64.b64encode(doc.read_bytes()).decode("ascii")
+    opts = captured["json"]["options"]
+    assert opts["do_ocr"] is True
+    assert "ru" in opts["ocr_lang"]
+    assert "md_page_break_placeholder" in opts
     assert result["chunks"]
     assert "регламента" in result["chunks"][0]["text"].lower()
+    assert result["chunker"] == "HybridChunker"
 
 
 @pytest.mark.asyncio

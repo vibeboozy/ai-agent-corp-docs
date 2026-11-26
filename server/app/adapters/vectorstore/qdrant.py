@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.vectorstore.qdrant
-PURPOSE: QdrantVectorStore adapter behind QDRANT_USE_STUB=false.
+PURPOSE: QdrantVectorStore live adapter.
 Dependencies: qdrant-client (optional extra); Settings
 CRITICAL: Auto-create collection (bge-m3 1024) before search/upsert; use query_points.
 DO:

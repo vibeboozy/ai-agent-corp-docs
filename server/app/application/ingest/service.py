@@ -1,6 +1,6 @@
 """
 ANCHOR: app.application.ingest.service
-PURPOSE: Ingest text/docs into vectorstore via Docling + embeddings (stub OK).
+PURPOSE: Ingest text/docs into vectorstore via Docling + embeddings.
 Dependencies: docling, libreoffice, embeddings, vectorstore, persistence
 DO:
 - Update document/chunk metadata in persistence
