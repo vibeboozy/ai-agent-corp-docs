@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Anchor standards: how agents must ground answers, clarify, escalate, learn, and use stubs.
+  These rules override convenience of "just answering".
+-->
+<anchor_standards scope="server" domain="russian_corporate_regulations">
+
+  <section id="grounding" title="Answer anchoring to retrieved chunks">
+    <rule id="ANC-GROUND-01" priority="critical">
+      Every final assistant answer (message_kind=answer) MUST be supported by one or more retrieved chunks
+      from the regulations KB. Attach citations: document_id, chunk_id, quote or location, score.
+    </rule>
+    <rule id="ANC-GROUND-02" priority="critical">
+      Do NOT invent articles, clause numbers, roles, or deadlines not present in retrieved text.
+      Unreliable = not exactly matching regulations OR supplemented from outside knowledge → treat as unsupported.
+    </rule>
+    <rule id="ANC-GROUND-03">
+      If the LLM draft contains claims beyond chunks, strip or refuse those claims; prefer escalate/clarify over partial hallucination.
+    </rule>
+    <rule id="ANC-GROUND-04">
+      Prefer citing the latest effective document when RETRIEVAL_PREFER_LATEST=true and versions conflict.
+    </rule>
+    <rule id="ANC-GROUND-05">
+      User-facing answer language: Russian is default for business content; keep citation metadata fields in English identifiers.
+    </rule>
+  </section>
+
+  <section id="refuse_escalate" title="Refuse and escalate when unsupported">
+    <rule id="ANC-ESC-01" priority="critical">
+      If no chunk set uniquely and sufficiently supports an answer after clarification attempts:
+      do NOT invent. Create quality-service escalation and/or tell the user to contact quality service / email
+      (QUALITY_SERVICE_EMAIL / configured copy).
+    </rule>
+    <rule id="ANC-ESC-02">
+      Escalation persists Escalation entity, notifies via escalation adapter, appends assistant escalation_notice message,
+      sets appeal status escalated, writes audit log.
+    </rule>
+    <rule id="ANC-ESC-03">
+      Escalation is a successful business path (not an internal 500) unless notification infrastructure itself fails.
+    </rule>
+  </section>
+
+  <section id="clarify" title="Clarifying questions policy">
+    <rule id="ANC-CLARIFY-01" priority="critical">
+      When the user question is underspecified OR maps to multiple conflicting regulation passages:
+      ask follow-up clarifying questions until an unambiguous answer is possible OR explicit inability → escalate.
+    </rule>
+    <rule id="ANC-CLARIFY-02">
+      Clarifying turns: message_kind=clarification; status=clarifying; do not upsert KB; optional light retrieval to propose options.
+    </rule>
+    <rule id="ANC-CLARIFY-03">
+      Cap clarify turns via DIALOGUE_MAX_CLARIFY_TURNS (default propose: 3). On exceed → escalate with reason max_clarify_exceeded.
+    </rule>
+    <rule id="ANC-CLARIFY-04">
+      Clarifying questions should reference missing dimensions (process type, document kind, role, date, department) — not dump full regulations.
+    </rule>
+  </section>
+
+  <section id="learning" title="Learning and KB update anchors">
+    <rule id="ANC-LEARN-01" priority="critical">
+      When knowledge was missing and officer provides canonical answer via officer-reply:
+      persist answer, link to appeal/escalation, then update KB through ingest/index (learning service).
+    </rule>
+    <rule id="ANC-LEARN-02">
+      Canonical officer text is an allowed source for new chunks; still store provenance (officer, appeal_id, timestamp).
+    </rule>
+    <rule id="ANC-LEARN-03">
+      After learning, subsequent equivalent questions SHOULD be answerable with citations to the new/updated chunks (stub or real).
+    </rule>
+    <rule id="ANC-LEARN-04">
+      Log all appeals and all learning events (continuous learning criterion).
+    </rule>
+  </section>
+
+  <section id="stubs" title="When to use stubs">
+    <rule id="ANC-STUB-01" priority="critical">
+      Local development and CI: USE_STUBS=true (or per-adapter stubs). No live LLM/embeddings/Qdrant/Docling required.
+    </rule>
+    <rule id="ANC-STUB-02">
+      Stub retrieval corpus must be rich enough to demo: grounded hit, ambiguous multi-hit, empty hit.
+    </rule>
+    <rule id="ANC-STUB-03">
+      Switching to real clients is configuration only; anchor rules above still apply unchanged.
+    </rule>
+    <rule id="ANC-STUB-04">
+      Agents implementing features must not bypass grounding because "stub already returns nice text" —
+      citations and policy checks remain mandatory.
+    </rule>
+  </section>
+
+  <section id="langgraph" title="LangGraph behavior anchors">
+    <rule id="ANC-LG-01">
+      Clarify / retrieve / ground / answer / escalate transitions are LangGraph edges — prompts must not bypass graph policy.
+    </rule>
+    <rule id="ANC-LG-02">
+      Do not add a LangChain RetrievalQA path that returns answers without the grounding node.
+    </rule>
+  </section>
+
+  <section id="agent_navigation" title="Navigation for coding agents">
+    <rule id="ANC-NAV-01">
+      Artifacts live under server/: read project_context.md for stack and REST; semantic_graph.xml for module edges;
+      dev_plan.xml for phase gates; this file before changing answer behavior.
+    </rule>
+    <rule id="ANC-NAV-02">
+      Changing clarify/escalate thresholds belongs in dialogue LangGraph / grounding + env — not ad-hoc in routers.
+    </rule>
+  </section>
+
+</anchor_standards>
