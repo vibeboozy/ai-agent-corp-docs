@@ -279,10 +279,10 @@ export class ChatTab {
             <path d="m9 12 2 2 4-4"/>
           </svg>
         </div>
-        <h2 class="empty-state-title">ИИ-ассистент Отдела качества</h2>
+        <h2 class="empty-state-title">ИИ-кузница: Поиск ответов по регламентам</h2>
         <p class="empty-state-desc">
-          Консультации строго по утверждённым корпоративным регламентам.
-          Выберите типовой вопрос для быстрой демонстрации ключевых бизнес-сценариев:
+          Консультации строго по корпоративным регламентам Софтлайн (Служба качества).
+          Выберите сценарий для быстрой демонстрации ключевых бизнес-кейсов:
         </p>
 
         <div class="prompt-chips-title">Быстрые сценарии для проверки:</div>
@@ -342,6 +342,15 @@ export class ChatTab {
           <span class="badge badge-clarify">
             <span class="badge-dot"></span>
             Требуется уточнение
+          </span>
+        </div>
+      `;
+    } else if (msg.status === 'refusal') {
+      statusBadgeHtml = `
+        <div class="agent-status-header">
+          <span class="badge badge-escalate">
+            <span class="badge-dot"></span>
+            Вне компетенции регламентов
           </span>
         </div>
       `;
