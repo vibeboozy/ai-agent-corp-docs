@@ -297,10 +297,23 @@ export class ChatTab {
     // Привязка кликов для переключения между сессиями (без кнопки удаления)
     const items = list.querySelectorAll('.history-session-item');
     items.forEach((item) => {
-      item.addEventListener('click', () => {
+      item.addEventListener('click', async () => {
         const sid = item.getAttribute('data-session-id');
         if (sid && sid !== store.getState().sessionId) {
           store.switchSession(sid);
+
+          // Если в режиме API и это серверный UUID, подтягиваем актуальные сообщения через GET /appeals/{id}/messages
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid);
+          if (store.getState().mode === 'api' && isUuid) {
+            try {
+              const res = await apiClient.getAppealMessages(sid);
+              if (res && res.items && res.items.length > 0) {
+                store.setState({ chatMessages: res.items });
+              }
+            } catch (err) {
+              console.warn('Не удалось загрузить историю с сервера, используется локальный кэш:', err);
+            }
+          }
         }
         this.closeMobileSidebar();
       });

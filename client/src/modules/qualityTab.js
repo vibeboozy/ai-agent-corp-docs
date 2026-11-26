@@ -208,9 +208,34 @@ export class QualityTab {
     // Привязка кликов по карточкам
     const cards = listContainer.querySelectorAll('.ticket-card');
     cards.forEach((card) => {
-      card.addEventListener('click', () => {
+      card.addEventListener('click', async () => {
         const id = card.getAttribute('data-ticket-id');
         store.setState({ selectedTicketId: id });
+
+        // Если в режиме API и это серверный UUID, подтягиваем свежие детали через GET /appeals/{id}
+        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+        if (store.getState().mode === 'api' && isUuid) {
+          try {
+            const freshAppeal = await apiClient.getAppeal(id);
+            if (freshAppeal) {
+              const currentTickets = store.getState().tickets || [];
+              const updatedTickets = currentTickets.map((t) => {
+                if (t.ticket_id === id) {
+                  return {
+                    ...t,
+                    question: freshAppeal.topic || freshAppeal.summary || t.question,
+                    email_body: freshAppeal.summary || t.email_body,
+                    raw_status: freshAppeal.status
+                  };
+                }
+                return t;
+              });
+              store.setState({ tickets: updatedTickets });
+            }
+          } catch (err) {
+            console.warn('Не удалось обновить данные тикета с сервера:', err);
+          }
+        }
       });
     });
   }

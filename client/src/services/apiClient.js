@@ -260,6 +260,71 @@ class ApiClient {
       method: 'GET'
     });
   }
+
+  /**
+   * Получение детальной карточки обращения (GET /api/v1/appeals/{id})
+   * @param {string} appealId
+   */
+  async getAppeal(appealId) {
+    if (this.isMockMode()) {
+      const tickets = mockService.getStoredTickets();
+      const ticket = tickets.find((t) => t.ticket_id === appealId || t.session_id === appealId);
+      if (!ticket) throw new Error('Обращение не найдено');
+      return ticket;
+    }
+
+    return await this.request(`/appeals/${appealId}`, {
+      method: 'GET'
+    });
+  }
+
+  /**
+   * Получение полной истории сообщений обращения с бэкенда (GET /api/v1/appeals/{id}/messages)
+   * @param {string} appealId
+   */
+  async getAppealMessages(appealId) {
+    if (this.isMockMode()) {
+      const history = mockService.getHistory();
+      return {
+        appeal_id: appealId,
+        items: history
+      };
+    }
+
+    const data = await this.request(`/appeals/${appealId}/messages`, {
+      method: 'GET'
+    });
+
+    const items = data.items || [];
+    return {
+      appeal_id: data.appeal_id || appealId,
+      items: items.map((m) => {
+        let status = 'answer';
+        if (m.message_kind === 'clarification') {
+          status = 'clarify';
+        } else if (m.message_kind === 'escalation_notice') {
+          status = 'escalate';
+        } else if (m.message_kind === 'refusal') {
+          status = 'refusal';
+        }
+
+        const citations = (m.citations || []).map((c) => ({
+          doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
+          section: c.locator || '',
+          quote: c.quote || ''
+        }));
+
+        return {
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          status,
+          citations,
+          timestamp: m.created_at || new Date().toISOString()
+        };
+      })
+    };
+  }
 }
 
 export const apiClient = new ApiClient();
