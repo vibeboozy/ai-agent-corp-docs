@@ -141,7 +141,7 @@ class MockService {
       };
     }
 
-    // 2. КЕЙС 1: Прямой ответ по регламенту (возврат после активации ключа)
+    // 2. КЕЙС 1: Прямой ответ по регламенту (возврат лицензии ИЛИ подписание договоров на закупку)
     if (
       (qLower.includes('вернуть') || qLower.includes('возврат')) &&
       qLower.includes('активац')
@@ -160,9 +160,27 @@ class MockService {
       };
     }
 
-    // 3. КЕЙС 2: Уточняющий диалог (ключ не пришёл, оплата прошла)
+    if (qLower.includes('договор') && (qLower.includes('закупк') || qLower.includes('закуп')) && !qLower.includes('подряд')) {
+      return {
+        status: 'answer',
+        reply: 'Договоры на закупку товаров и услуг подписывает руководитель службы снабжения (при сумме сделки до 1 000 000 руб.) либо генеральный директор компании (при сумме свыше 1 000 000 руб.) в соответствии с утверждённой матрицей полномочий.',
+        citations: [
+          {
+            doc_name: 'Регламент закупок товаров и услуг',
+            section: 'п. 3.2 (Полномочия подписания)',
+            quote: 'Договоры на закупку товаров и услуг подписываются руководителем службы снабжения в пределах лимита 1 млн руб. При превышении лимита договор подлежит подписанию генеральным директором.'
+          }
+        ],
+        email_draft: null
+      };
+    }
+
+    // 3. КЕЙС 2: Уточняющий диалог (ключ не пришёл ИЛИ неоднозначный вопрос о договорах)
     const isPaymentIssue = qLower.includes('ключ не приш') ||
       (qLower.includes('оплата прошла') || (qLower.includes('оплат') && qLower.includes('ключ')));
+
+    const isContractIssue = qLower.includes('кто подписывает договор') ||
+      (qLower.includes('подписывает') && qLower.includes('договор') && !qLower.includes('закупк') && !qLower.includes('подряд'));
 
     // Проверяем последнее сообщение ассистента в истории
     const lastAssistantMsg = [...history].reverse().find((m) => m.role === 'assistant');
@@ -176,6 +194,48 @@ class MockService {
         citations: [],
         email_draft: null
       };
+    }
+
+    if (isContractIssue && !wasClarifyingQuestionAsked) {
+      return {
+        status: 'clarify',
+        reply: 'В корпоративных регламентах описаны разные правила подписания: отдельно для договоров закупки товаров и договоров с подрядчиками на оказание услуг. Уточните, пожалуйста: речь идёт о закупке товаров или договоре подряда?',
+        citations: [],
+        email_draft: null
+      };
+    }
+
+    const wasContractClarifyingAsked = lastAssistantMsg && lastAssistantMsg.content &&
+      lastAssistantMsg.content.includes('закупке товаров или договоре подряда');
+
+    if (wasContractClarifyingAsked) {
+      if (qLower.includes('закупк') || qLower.includes('товар') || qLower.includes('перв')) {
+        return {
+          status: 'answer',
+          reply: 'Договоры на закупку товаров подписывает руководитель службы снабжения (до 1 млн руб.) либо генеральный директор компании (свыше 1 млн руб.).',
+          citations: [
+            {
+              doc_name: 'Регламент закупок товаров и услуг',
+              section: 'п. 3.2',
+              quote: 'Договоры на закупку товаров подписываются руководителем службы снабжения согласно утверждённой матрице лимитов.'
+            }
+          ],
+          email_draft: null
+        };
+      } else {
+        return {
+          status: 'answer',
+          reply: 'Договоры подряда на оказание услуг подписываются директором по операционной деятельности независимо от суммы договора.',
+          citations: [
+            {
+              doc_name: 'Регламент взаимодействия с подрядчиками',
+              section: 'п. 4.1',
+              quote: 'Все договоры подряда и возмездного оказания услуг подлежат визированию и подписанию операционным директором компании.'
+            }
+          ],
+          email_draft: null
+        };
+      }
     }
 
     if (wasClarifyingQuestionAsked) {

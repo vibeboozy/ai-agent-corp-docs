@@ -10,18 +10,25 @@ export function createSessionId() {
   return 'sess-' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
 }
 
+const safeStorage = typeof localStorage !== 'undefined' ? localStorage : {
+  _data: {},
+  getItem(k) { return this._data[k] || null; },
+  setItem(k, v) { this._data[k] = String(v); },
+  removeItem(k) { delete this._data[k]; }
+};
+
 // Загрузка начальных параметров из localStorage
-const savedMode = localStorage.getItem(CONFIG.STORAGE_KEYS.MODE) || CONFIG.DEFAULT_MODE;
-const savedApiUrl = localStorage.getItem(CONFIG.STORAGE_KEYS.API_URL) || CONFIG.DEFAULT_API_BASE_URL;
-let savedSessionId = localStorage.getItem(CONFIG.STORAGE_KEYS.SESSION_ID);
+const savedMode = safeStorage.getItem(CONFIG.STORAGE_KEYS.MODE) || CONFIG.DEFAULT_MODE;
+const savedApiUrl = safeStorage.getItem(CONFIG.STORAGE_KEYS.API_URL) || CONFIG.DEFAULT_API_BASE_URL;
+let savedSessionId = safeStorage.getItem(CONFIG.STORAGE_KEYS.SESSION_ID);
 if (!savedSessionId) {
   savedSessionId = createSessionId();
-  localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION_ID, savedSessionId);
+  safeStorage.setItem(CONFIG.STORAGE_KEYS.SESSION_ID, savedSessionId);
 }
 
 let savedChat = [];
 try {
-  const rawChat = localStorage.getItem(CONFIG.STORAGE_KEYS.CHAT_HISTORY);
+  const rawChat = safeStorage.getItem(CONFIG.STORAGE_KEYS.CHAT_HISTORY);
   if (rawChat) savedChat = JSON.parse(rawChat);
 } catch {
   savedChat = [];
@@ -29,7 +36,7 @@ try {
 
 let savedSessions = [];
 try {
-  const rawSessions = localStorage.getItem(CONFIG.STORAGE_KEYS.SESSIONS);
+  const rawSessions = safeStorage.getItem(CONFIG.STORAGE_KEYS.SESSIONS);
   if (rawSessions) savedSessions = JSON.parse(rawSessions);
 } catch {
   savedSessions = [];
@@ -45,7 +52,7 @@ if (savedChat.length > 0 && !savedSessions.some((s) => s.session_id === savedSes
     updated_at: new Date().toISOString(),
     messages: savedChat
   });
-  localStorage.setItem(CONFIG.STORAGE_KEYS.SESSIONS, JSON.stringify(savedSessions));
+  safeStorage.setItem(CONFIG.STORAGE_KEYS.SESSIONS, JSON.stringify(savedSessions));
 }
 
 const initialState = {
@@ -79,19 +86,19 @@ class Store {
 
     // Синхронизация с localStorage
     if (partial.mode !== undefined) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.MODE, this.state.mode);
+      safeStorage.setItem(CONFIG.STORAGE_KEYS.MODE, this.state.mode);
     }
     if (partial.apiBaseUrl !== undefined) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.API_URL, this.state.apiBaseUrl);
+      safeStorage.setItem(CONFIG.STORAGE_KEYS.API_URL, this.state.apiBaseUrl);
     }
     if (partial.sessionId !== undefined) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.SESSION_ID, this.state.sessionId);
+      safeStorage.setItem(CONFIG.STORAGE_KEYS.SESSION_ID, this.state.sessionId);
     }
     if (partial.chatMessages !== undefined) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(this.state.chatMessages));
+      safeStorage.setItem(CONFIG.STORAGE_KEYS.CHAT_HISTORY, JSON.stringify(this.state.chatMessages));
     }
     if (partial.sessions !== undefined) {
-      localStorage.setItem(CONFIG.STORAGE_KEYS.SESSIONS, JSON.stringify(this.state.sessions));
+      safeStorage.setItem(CONFIG.STORAGE_KEYS.SESSIONS, JSON.stringify(this.state.sessions));
     }
 
     // Оповещение подписчиков
@@ -134,6 +141,25 @@ class Store {
         chatLoading: false
       });
     }
+  }
+
+  /**
+   * Обновление идентификатора сессии при получении реального UUID от бэкенда
+   * @param {string} oldId 
+   * @param {string} newId 
+   */
+  updateSessionId(oldId, newId) {
+    if (!newId || oldId === newId) return;
+    const sessions = this.state.sessions.map((s) => {
+      if (s.session_id === oldId) {
+        return { ...s, session_id: newId };
+      }
+      return s;
+    });
+    this.setState({
+      sessionId: newId,
+      sessions
+    });
   }
 
   /**

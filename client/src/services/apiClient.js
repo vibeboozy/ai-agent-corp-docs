@@ -16,7 +16,8 @@ class ApiClient {
    * Выполнение сетевого HTTP-запроса с таймаутом и обработкой ошибок
    */
   async request(endpoint, options = {}) {
-    const url = `${this.getBaseUrl()}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+    const baseUrl = this.getBaseUrl();
+    const url = `${baseUrl}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
     const timeout = options.timeout || CONFIG.REQUEST_TIMEOUT_MS;
 
     const controller = new AbortController();
@@ -49,7 +50,7 @@ class ApiClient {
             errorDetail = errorData.message;
           }
         } catch {
-          // Игнорируем ошибку парсинга тела ошибки
+          // Игнорируем ошибку парсинга тела
         }
         throw new Error(errorDetail);
       }
@@ -65,7 +66,7 @@ class ApiClient {
   }
 
   /**
-   * Отправка вопроса в чат (POST /chat)
+   * Отправка вопроса в чат (адаптировано под Appeal-центричный контракт бэкенда /api/v1/appeals)
    * @param {{ question: string, session_id: string, history: Array }} payload
    */
   async sendChatMessage(payload) {
@@ -73,43 +74,106 @@ class ApiClient {
       return await mockService.sendChatMessage(payload);
     }
 
-    return await this.request('/chat', {
-      method: 'POST',
-      body: JSON.stringify({
-        question: payload.question,
-        session_id: payload.session_id,
-        history: payload.history || []
-      })
-    });
+    const { question, session_id } = payload;
+    const isServerUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(session_id);
+
+    let responseData;
+    if (isServerUuid) {
+      // Продолжение диалога внутри существующего обращения: POST /api/v1/appeals/{id}/messages
+      responseData = await this.request(`/appeals/${session_id}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          content: question,
+          role: 'user'
+        })
+      });
+    } else {
+      // Старт нового обращения: POST /api/v1/appeals
+      responseData = await this.request('/appeals', {
+        method: 'POST',
+        body: JSON.stringify({
+          topic: question.slice(0, 50),
+          message: {
+            content: question
+          }
+        })
+      });
+    }
+
+    const appeal = responseData.appeal || {};
+    const messages = responseData.messages || [];
+    const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant') || messages[messages.length - 1];
+
+    let status = 'answer';
+    if (appeal.status === 'clarifying' || lastAssistantMsg?.message_kind === 'clarification') {
+      status = 'clarify';
+    } else if (appeal.status === 'escalated' || lastAssistantMsg?.message_kind === 'escalation_notice') {
+      status = 'escalate';
+    }
+
+    const citations = (lastAssistantMsg?.citations || []).map((c) => ({
+      doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
+      section: c.locator || '',
+      quote: c.quote || ''
+    }));
+
+    let email_draft = null;
+    if (status === 'escalate') {
+      email_draft = {
+        to: 'quality@company.ru',
+        subject: `Запрос разъяснения регламента: ${question.slice(0, 45)}...`,
+        body: `Здравствуйте!\n\nПрошу предоставить официальное разъяснение по вопросу:\n«${question}»\n\nС уважением,\nСотрудник отдела сопровождения`
+      };
+    }
+
+    // Если сервер сгенерировал новый UUID для Appeal, синхронизируем идентификатор сессии
+    if (appeal.id && String(appeal.id) !== session_id) {
+      store.updateSessionId(session_id, String(appeal.id));
+    }
+
+    return {
+      status,
+      reply: lastAssistantMsg?.content || 'Ответ сформирован.',
+      citations,
+      email_draft,
+      appeal_id: appeal.id || session_id
+    };
   }
 
   /**
-   * Создание тикета при эскалации (POST /tickets)
-   * @param {{ question: string, email_draft: Object, session_id: string, context?: string }} payload
+   * Создание тикета при эскалации
    */
   async createTicket(payload) {
     if (this.isMockMode()) {
       return await mockService.createTicket(payload);
     }
 
-    const data = await this.request('/tickets', {
+    // На бэкенде Appeal создаётся сразу при первом вопросе
+    if (payload.session_id) {
+      return {
+        ticket_id: payload.session_id,
+        status: 'open'
+      };
+    }
+
+    const data = await this.request('/appeals', {
       method: 'POST',
       body: JSON.stringify({
-        question: payload.question,
-        email_to: payload.email_draft?.to || 'quality@company.ru',
-        email_subject: payload.email_draft?.subject || '',
-        email_body: payload.email_draft?.body || '',
-        email_draft: payload.email_draft,
-        session_id: payload.session_id,
-        context: payload.context || ''
+        topic: payload.question || 'Эскалация в Службу качества',
+        message: {
+          content: payload.question || payload.email_draft?.body || ''
+        }
       })
     });
 
-    return data.ticket || data;
+    return {
+      ticket_id: data.appeal?.id || 'SQ-101',
+      status: 'open'
+    };
   }
 
   /**
-   * Загрузка списка тикетов (GET /tickets)
+   * Загрузка списка тикетов / обращений (GET /api/v1/appeals)
    * @param {string} [status]
    */
   async getTickets(status = null) {
@@ -117,18 +181,39 @@ class ApiClient {
       return await mockService.getTickets(status);
     }
 
-    const query = status && status !== 'all' ? `?status=${encodeURIComponent(status)}` : '';
-    const data = await this.request(`/tickets${query}`, {
+    let query = '';
+    if (status === 'open') {
+      query = '?status=escalated';
+    } else if (status === 'resolved') {
+      query = '?status=resolved_by_officer';
+    }
+
+    const data = await this.request(`/appeals${query}`, {
       method: 'GET'
     });
 
-    if (Array.isArray(data)) return data;
-    if (data && Array.isArray(data.tickets)) return data.tickets;
-    return [];
+    const items = data.items || (Array.isArray(data) ? data : []);
+
+    return items.map((item) => {
+      const isResolved = item.status === 'resolved_by_officer' || item.status === 'closed';
+      return {
+        ticket_id: String(item.id),
+        question: item.topic || item.summary || 'Вопрос сотрудника в Службу качества',
+        status: isResolved ? 'resolved' : 'open',
+        raw_status: item.status,
+        email_to: 'quality@company.ru',
+        email_subject: item.topic || `Обращение ${String(item.id).slice(0, 8)}`,
+        email_body: item.summary || '',
+        created_at: item.created_at,
+        answer: item.summary || (isResolved ? 'Ответ эксперта внесён в базу знаний' : null),
+        regulation_ref: item.topic || 'Регламент компании',
+        resolved_at: isResolved ? item.updated_at : null
+      };
+    });
   }
 
   /**
-   * Добавление ответа эксперта и пополнение БЗ (POST /tickets/{ticketId}/resolve)
+   * Закрытие тикета экспертом СК и дообучение (POST /api/v1/appeals/{id}/officer-reply)
    * @param {string} ticketId
    * @param {{ answer: string, regulation_ref: string }} payload
    */
@@ -137,15 +222,43 @@ class ApiClient {
       return await mockService.resolveTicket(ticketId, payload);
     }
 
-    const data = await this.request(`/tickets/${encodeURIComponent(ticketId)}/resolve`, {
+    const data = await this.request(`/appeals/${ticketId}/officer-reply`, {
       method: 'POST',
       body: JSON.stringify({
-        answer: payload.answer,
-        regulation_ref: payload.regulation_ref
+        content: payload.answer,
+        source_document_hint: payload.regulation_ref
       })
     });
 
-    return data.ticket || data;
+    const appeal = data.appeal || {};
+    return {
+      ticket_id: appeal.id || ticketId,
+      status: 'resolved',
+      answer: payload.answer,
+      regulation_ref: payload.regulation_ref,
+      resolved_at: appeal.updated_at || new Date().toISOString()
+    };
+  }
+
+  /**
+   * Получение статистики для вкладки Аналитики (GET /api/v1/stats)
+   */
+  async getStats() {
+    if (this.isMockMode()) {
+      return {
+        appeals_total: 42,
+        by_status: { answered: 28, clarifying: 6, escalated: 8 },
+        messages_total: 126,
+        clarify_rate: 0.14,
+        escalation_rate: 0.19,
+        answered_rate: 0.67,
+        learning_updates: 5
+      };
+    }
+
+    return await this.request('/stats', {
+      method: 'GET'
+    });
   }
 }
 
