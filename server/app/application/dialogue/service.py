@@ -1,6 +1,6 @@
 """
 ANCHOR: app.application.dialogue.service
-PURPOSE: Service skeleton for dialogue (NotImplemented).
+PURPOSE: Run one dialogue turn via LangGraph; persist outcome messages.
 Dependencies: langgraph_runtime, retrieval, grounding, quality_escalation, llm port, persistence
 CRITICAL: Clarify or escalate — never invent (ANC-CLARIFY-01, ANC-ESC-01, ANC-LG-01).
 DO:
@@ -13,9 +13,135 @@ DONT:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from app.adapters.persistence.port import Persistence
+from app.application.dialogue.graph import build_dialogue_graph
+from app.application.dialogue.nodes import DialogueDeps
+from app.application.dialogue.state import DialogueState
+from app.application.quality_escalation.service import QualityEscalationService
+from app.domain.enums import AppealStatus, MessageKind, MessageRole
+from app.domain.errors import ConflictError, NotFoundError
+from app.domain.models import Appeal, Message
+
+
+@dataclass
+class DialogueTurnResult:
+    appeal: Appeal
+    messages: list[Message]
+    outcome: str
+    node_trace: list[str]
+
 
 class DialogueService:
-    """Placeholder application service — implement in later phases."""
+    def __init__(
+        self,
+        *,
+        persistence: Persistence,
+        deps: DialogueDeps,
+        escalation: QualityEscalationService,
+        max_clarify_turns: int = 3,
+    ) -> None:
+        self._persistence = persistence
+        self._deps = deps
+        self._escalation = escalation
+        self._max_clarify_turns = max_clarify_turns
+        self._graph = build_dialogue_graph(deps)
 
-    async def run(self, *args, **kwargs):  # noqa: ANN002, ANN003
-        raise NotImplementedError("dialogue service not implemented")
+    async def run_turn(
+        self,
+        *,
+        appeal_id: UUID,
+        content: str,
+        role: MessageRole = MessageRole.USER,
+    ) -> DialogueTurnResult:
+        appeal = await self._persistence.get_appeal(appeal_id)
+        if appeal is None:
+            raise NotFoundError(f"Appeal {appeal_id} not found")
+        if appeal.status == AppealStatus.CLOSED:
+            raise ConflictError("Appeal is closed")
+        if role != MessageRole.USER:
+            raise ConflictError("Only user role is accepted on message endpoint", code="VALIDATION_ERROR")
+
+        user_msg = await self._persistence.add_message(
+            appeal_id=appeal_id,
+            role=MessageRole.USER,
+            message_kind=MessageKind.QUESTION,
+            content=content,
+        )
+
+        history_msgs = await self._persistence.list_messages(appeal_id, limit=200)
+        history = [m.content for m in history_msgs if m.role == MessageRole.USER and m.id != user_msg.id]
+        clarify_turns = sum(
+            1 for m in history_msgs if m.message_kind == MessageKind.CLARIFICATION
+        )
+
+        initial: DialogueState = {
+            "appeal_id": str(appeal_id),
+            "user_message": content,
+            "history": history,
+            "clarify_turns": clarify_turns,
+            "max_clarify_turns": self._max_clarify_turns,
+            "node_trace": [],
+        }
+        final: dict[str, Any] = await self._graph.ainvoke(initial)
+        outcome = str(final.get("outcome") or "escalate")
+        node_trace = list(final.get("node_trace") or [])
+
+        new_messages: list[Message] = [user_msg]
+
+        if outcome == "clarify":
+            assistant = await self._persistence.add_message(
+                appeal_id=appeal_id,
+                role=MessageRole.ASSISTANT,
+                message_kind=MessageKind.CLARIFICATION,
+                content=str(final.get("clarification_text") or "Уточните вопрос, пожалуйста."),
+            )
+            appeal = await self._persistence.update_appeal(
+                appeal_id, status=AppealStatus.CLARIFYING
+            )
+            new_messages.append(assistant)
+        elif outcome == "answer":
+            citations = list(final.get("citations") or [])
+            assistant = await self._persistence.add_message(
+                appeal_id=appeal_id,
+                role=MessageRole.ASSISTANT,
+                message_kind=MessageKind.ANSWER,
+                content=str(final.get("draft_answer") or ""),
+                citations=citations,
+            )
+            appeal = await self._persistence.update_appeal(
+                appeal_id,
+                status=AppealStatus.ANSWERED,
+                summary=str(final.get("draft_answer") or "")[:240],
+            )
+            new_messages.append(assistant)
+        else:
+            reason = str(final.get("escalation_reason") or "ungrounded")
+            _esc, notice = await self._escalation.escalate(
+                appeal_id=appeal_id,
+                reason=reason,
+                summary=content[:500],
+            )
+            assistant = await self._persistence.add_message(
+                appeal_id=appeal_id,
+                role=MessageRole.ASSISTANT,
+                message_kind=MessageKind.ESCALATION_NOTICE,
+                content=notice,
+            )
+            appeal = await self._persistence.get_appeal(appeal_id) or appeal
+            new_messages.append(assistant)
+
+        await self._persistence.add_audit_event(
+            appeal_id=appeal_id,
+            event_type="dialogue_turn",
+            payload={"outcome": outcome, "node_trace": node_trace},
+        )
+        return DialogueTurnResult(
+            appeal=appeal,
+            messages=new_messages,
+            outcome=outcome,
+            node_trace=node_trace,
+        )

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-agent-corp-server"
 version = "0.1.0"
-description = "Corporate RAG AI-Agent server (skeleton — stubs only)"
+description = "Corporate RAG AI-Agent server (stubs-first vertical slice)"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -14,10 +14,7 @@ dependencies = [
   "pydantic>=2.9.0",
   "pydantic-settings>=2.6.0",
   "httpx>=0.27.0",
-  # Declared for later phases; dialogue graph compiles when implemented
   "langgraph>=0.2.0",
-  # Optional thin message types only — not primary RAG
-  # "langchain-core>=0.3.0",
 ]
 
 [project.optional-dependencies]

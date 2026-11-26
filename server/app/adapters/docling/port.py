@@ -11,6 +11,6 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class DoclingClient(Protocol):
-    async def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        """Port method placeholder — refine signatures in implementation phases."""
+    async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict[str, Any]:
+        """Convert document or raw text into structured chunks."""
         ...

@@ -1,31 +1,81 @@
 """
 ANCHOR: app.adapters.embeddings.HttpEmbeddingsClient
-PURPOSE: Real HttpEmbeddingsClient adapter skeleton — NotImplemented until live-adapter phase.
+PURPOSE: Real embeddings client (OpenAI-compatible /embeddings).
 Dependencies: httpx; Settings
-CRITICAL: Selected only when USE_STUBS=false and matching *_USE_STUB=false.
-DO:
-- Enforce *_TIMEOUT_S on clients
-- Map failures to typed errors without leaking secrets
-DONT:
-- Call from application without DI factory
 """
 
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
+
+import httpx
 
 from app.adapters.embeddings.port import EmbeddingsClient
+from app.domain.errors import AppError, UpstreamTimeoutError
 
 
 class HttpEmbeddingsClient:
-    """Real provider skeleton."""
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str | None,
+        dense_model: str,
+        sparse_model: str,
+        timeout_s: float = 120.0,
+        allow_hosts: set[str] | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._dense_model = dense_model
+        self._sparse_model = sparse_model
+        self._timeout = timeout_s
+        self._allow_hosts = allow_hosts or set()
+        if self._allow_hosts:
+            host = (urlparse(self._base_url).hostname or "").lower()
+            if host and host not in self._allow_hosts:
+                raise AppError(f"Embeddings host not allowlisted: {host}", code="EGRESS_DENIED")
 
-    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-        pass
+    async def embed_dense(self, texts: list[str]) -> list[list[float]]:
+        return await self._embed(self._dense_model, texts)
 
-    async def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("HttpEmbeddingsClient not implemented")
+    async def embed_sparse(self, texts: list[str]) -> list[dict[str, float]]:
+        # Many OpenAI-compatible stacks return dense only; map tokens locally as fallback.
+        _ = await self._embed(self._sparse_model, texts)
+        result: list[dict[str, float]] = []
+        for text in texts:
+            weights: dict[str, float] = {}
+            for token in text.lower().split():
+                if len(token) > 2:
+                    weights[token] = weights.get(token, 0.0) + 1.0
+            result.append(weights)
+        return result
+
+    async def _embed(self, model: str, texts: list[str]) -> list[Any]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(
+                    f"{self._base_url}/embeddings",
+                    headers=headers,
+                    json={"model": model, "input": texts},
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                items = sorted(data["data"], key=lambda x: x["index"])
+                return [item["embedding"] for item in items]
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeoutError("Embeddings request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise AppError("Embeddings upstream error", code="UPSTREAM_ERROR") from exc
 
 
-# Structural compatibility with EmbeddingsClient
-_: EmbeddingsClient = HttpEmbeddingsClient()  # type: ignore[assignment]
+_: EmbeddingsClient = HttpEmbeddingsClient(  # type: ignore[assignment]
+    base_url="https://example.invalid/v1",
+    api_key=None,
+    dense_model="x",
+    sparse_model="y",
+)
