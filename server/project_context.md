@@ -75,7 +75,7 @@
     rules/
     .env.example
     pyproject.toml
-    ANCHOR.md               # module docstring anchor guide
+    rules/anchor_standards.xml  # behavioral + module-docstring anchors (ANC-MARK-*)
     app/
       main.py               # FastAPI entry
       api/

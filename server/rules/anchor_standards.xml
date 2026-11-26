@@ -109,8 +109,14 @@
 
   <section id="module_markup" title="Module file anchor markup">
     <!--
-      Code-file headers for agent navigation. Human guide: server/ANCHOR.md.
-      Distinct from grounding/clarify/escalate behavioral anchors above.
+      Code-file headers for agent navigation (distinct from grounding/clarify behavioral anchors).
+      This section is the single source of truth — there is no separate ANCHOR.md.
+      Template:
+        ANCHOR: app.example.module
+        PURPOSE: Short responsibility statement.
+        Dependencies: app.domain, persistence port
+        CRITICAL: Never invent answers without citations (ANC-GROUND-01).
+        DO: / DONT: optional bullets
     -->
     <rule id="ANC-MARK-01" priority="critical">
       Every Python module under server/app/ and server/tests/ MUST begin with a module docstring
@@ -129,7 +135,8 @@
       update those docs lightly if names must diverge.
     </rule>
     <rule id="ANC-MARK-05">
-      Full authoring guide: server/ANCHOR.md (linked from server/README.md).
+      Keep anchors short; cite rule ids from this file and coding_standards.xml. Update the header
+      in the same PR when module ownership or Dependencies change.
     </rule>
   </section>
 

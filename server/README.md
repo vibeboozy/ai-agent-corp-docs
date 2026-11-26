@@ -55,12 +55,22 @@ USE_STUBS=true uvicorn app.main:app --reload --host "${APP_HOST}" --port "${APP_
 
 ### 4. Connectivity check (CLI)
 
+After `pip install -e ".[dev,…]"` the `rag-server` console script is on your environment’s script path (ensure that directory is on `PATH`, e.g. `~/.local/bin` for user installs).
+
 ```bash
 USE_STUBS=true rag-server check
-# or: python -m app.cli check
+# equivalent without relying on PATH:
+USE_STUBS=true python3 -m app.cli check
 ```
 
-Prints `overall` plus lines for `llm`, `embeddings`, `qdrant`, `docling`, `postgres`. Exit `0` when all OK. With stubs, all should report `mode=stub` and `OK`. Live mode uses the same command after flipping the matching `*_USE_STUB=false` flags.
+Prints `overall` plus lines for `llm`, `embeddings`, `qdrant`, `docling`, `postgres`. Exit `0` when all OK. With stubs, all should report `mode=stub` and `OK`. Live mode uses the same command after flipping the matching `*_USE_STUB=false` flags (and restarting any long-lived API process so DI cache picks up env).
+
+Optional Docling file ingest (live Docling + embeddings + Qdrant):
+
+```bash
+rag-server ingest-docx /path/to/reg.docx --title "Procurement"
+# or: python3 -m app.cli ingest-docx /path/to/reg.docx
+```
 
 ### 5. Tests (default = stubs)
 
@@ -95,7 +105,7 @@ alembic upgrade head
 | [CLIENT_INFO.md](CLIENT_INFO.md) | REST contract |
 | [dev_plan.xml](dev_plan.xml) | Phased plan |
 | [DEMO.md](DEMO.md) | Three success-criteria scenarios |
-| [rules/](rules/) | Coding / security / testing / anchors |
+| [rules/](rules/) | Coding / security / testing / anchors (`anchor_standards.xml`) |
 | [.env.example](.env.example) | All env keys |
 
 ## Package layout

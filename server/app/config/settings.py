@@ -157,4 +157,12 @@ def get_settings() -> Settings:
 
 
 def clear_settings_cache() -> None:
+    """Drop Settings cache and DI container so API/CLI see fresh env flags."""
     get_settings.cache_clear()
+    # Avoid circular import at module load; clear container when available.
+    try:
+        from app.config.factories import reset_container
+
+        reset_container()
+    except Exception:
+        pass

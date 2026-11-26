@@ -98,6 +98,7 @@ def _build_vectorstore(settings: Settings) -> Any:
         collection=settings.qdrant_collection,
         timeout_s=settings.qdrant_timeout_s,
         upsert_batch=settings.qdrant_upsert_batch,
+        vector_size=settings.embeddings_dense_dim,
     )
 
 
