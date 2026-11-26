@@ -48,8 +48,18 @@ async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
     container = build_container(settings)
     src = Path(path)
     if not src.is_file():
-        print(f"error: file not found: {path}", file=sys.stderr)
-        return 2
+        # Resolve relative paths against DOCS_CORPUS_PATH / DOCS_DIR when needed.
+        corpus = Path(settings.resolved_docs_corpus_path())
+        candidate = corpus / path
+        if candidate.is_file():
+            src = candidate
+        else:
+            print(
+                f"error: file not found: {path} "
+                f"(also checked under corpus {corpus})",
+                file=sys.stderr,
+            )
+            return 2
     converted = await container.docling.convert(source_path=str(src.resolve()))
     chunks = converted.get("chunks") or []
     if not chunks:

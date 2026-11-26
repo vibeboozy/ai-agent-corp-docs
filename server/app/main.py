@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.router import api_router
+from app.api.router import build_api_router
 from app.config.factories import get_container, reset_container
 from app.config.settings import get_settings
 from app.logging.setup import RequestIdMiddleware, configure_logging
@@ -40,16 +40,19 @@ def create_app() -> FastAPI:
         title="Corporate RAG AI-Agent",
         version="0.3.0",
         description=(
-            "Corporate RAG AI-Agent API. Always uses live LLM, embeddings, "
+            "Corporate RAG AI-Agent API. Uses LLM, embeddings, "
             "Qdrant, Docling, and Postgres clients configured via environment."
         ),
+        debug=settings.app_env.lower() in {"development", "dev", "local"},
         lifespan=lifespan,
     )
     app.add_middleware(
         RequestIdMiddleware,
         header_name=settings.log_correlation_header,
+        log_request_body=settings.log_request_body,
+        log_redact_secrets=settings.log_redact_secrets,
     )
-    app.include_router(api_router)
+    app.include_router(build_api_router(api_prefix=settings.api_prefix))
     return app
 
 

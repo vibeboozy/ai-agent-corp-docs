@@ -1,7 +1,7 @@
 """
 ANCHOR: app.application.retrieval
-PURPOSE: Hybrid dense+sparse search, RRF, optional rerank, prefer-latest.
-Dependencies: embeddings port, vectorstore port, optional llm for rerank
+PURPOSE: Hybrid dense+sparse search, RRF, prefer-latest.
+Dependencies: embeddings port, vectorstore port
 DO:
 - Prefer latest effective docs when configured
 DONT:

@@ -70,6 +70,7 @@ def _build_embeddings(settings: Settings) -> Any:
         dense_model=settings.embeddings_dense_model,
         sparse_model=settings.embeddings_sparse_model,
         timeout_s=settings.embeddings_timeout_s,
+        batch_size=settings.embeddings_batch_size,
         allow_hosts=settings.egress_hosts(),
     )
 
