@@ -6,11 +6,11 @@ Dependencies: typing.Protocol
 
 from __future__ import annotations
 
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
 class LibreOfficeConverter(Protocol):
-    async def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        """Port method placeholder — refine signatures in implementation phases."""
+    async def convert_to_pdf(self, source_path: str, dest_dir: str) -> str:
+        """Convert office document to PDF; return output path."""
         ...

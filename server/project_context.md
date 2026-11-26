@@ -99,7 +99,7 @@
         stubs/
       config/
       logging/
-    docs/                   # RAG corpus (docx)
+    docs/                   # LOCAL ONLY — RAG corpus (docx); path via DOCS_CORPUS_PATH / DOCS_DIR; gitignored
     tests/
       api/
       application/
@@ -234,8 +234,10 @@ All mutating endpoints append to appeal audit/log trail in PostgreSQL.
 
 ### 6.1 Ingest
 
+Corpus path is **local-only** (not in git): `DOCS_CORPUS_PATH` (default `docs`) or override `DOCS_DIR`. Create the folder on the machine that runs ingest.
+
 ```text
-docs/*.docx
+$DOCS_CORPUS_PATH/*.docx   # local corpus; gitignored
   → LibreOffice (if needed) / Docling convert
   → HybridChunker (tokenizer BAAI/bge-m3; max/overlap/min tokens from env)
   → dense + sparse embeddings (bge-m3)
@@ -335,6 +337,6 @@ Live suites must **skip** when flags/secrets are absent — never fail CI for mi
 | `rules/security_rules.xml` | Secrets, PII, SSRF |
 | `rules/testing_rules.xml` | Stub + live test policy |
 | `rules/anchor_standards.xml` | Grounding / clarify / escalate / stubs |
-| `.env.example` | All configuration keys |
+| `.env.example` | All configuration keys (incl. `DOCS_CORPUS_PATH` / `DOCS_DIR`) |
 | `CLIENT_INFO.md` | REST contract for future client AI agent |
-| `README.md` | Index and test command cheat sheet |
+| `README.md` | Index, connectivity `check`, and test command cheat sheet |

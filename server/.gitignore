@@ -11,3 +11,6 @@ venv/
 .mypy_cache/
 .ruff_cache/
 *.egg
+
+# Local RAG corpus (DOCS_CORPUS_PATH / DOCS_DIR; default ./docs — not committed)
+docs/
