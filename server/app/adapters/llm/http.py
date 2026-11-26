@@ -51,6 +51,21 @@ class HttpLLMClient:
         if host and host not in self._allow_hosts:
             raise AppError(f"LLM host not allowlisted: {host}", code="EGRESS_DENIED")
 
+    async def ping(self) -> bool:
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
+                resp = await client.get(f"{self._base_url}/models", headers=headers)
+                if resp.status_code < 500:
+                    return True
+                return False
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeoutError("LLM ping timed out") from exc
+        except httpx.HTTPError as exc:
+            raise AppError("LLM ping failed", code="UPSTREAM_ERROR") from exc
+
     async def complete(
         self,
         *,

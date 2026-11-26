@@ -11,6 +11,10 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class VectorStore(Protocol):
+    async def ping(self) -> bool:
+        """Connectivity probe — True when the store is reachable."""
+        ...
+
     async def search(
         self,
         query: str,

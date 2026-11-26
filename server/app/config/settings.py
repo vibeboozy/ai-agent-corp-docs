@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     auth_mode: str = Field(default="none", alias="AUTH_MODE")
     auth_officer_token: str | None = Field(default=None, alias="AUTH_OFFICER_TOKEN")
 
+    # --- docs corpus (local-only; not committed) ---
+    # Prefer DOCS_CORPUS_PATH; DOCS_DIR accepted as alias via model validator below.
+    docs_corpus_path: str = Field(default="docs", alias="DOCS_CORPUS_PATH")
+    docs_dir: str | None = Field(default=None, alias="DOCS_DIR")
+
     # --- persistence ---
     database_url: str | None = Field(
         default="postgresql+asyncpg://rag:rag@127.0.0.1:5432/rag_agent",
@@ -133,6 +138,12 @@ class Settings(BaseSettings):
             "persistence": self.persistence_use_stub,
         }
         return mapping.get(service, True)
+
+    def resolved_docs_corpus_path(self) -> str:
+        """Local corpus directory (gitignored); DOCS_DIR overrides when set."""
+        if self.docs_dir:
+            return self.docs_dir
+        return self.docs_corpus_path
 
     def egress_hosts(self) -> set[str]:
         if not self.egress_allow_hosts:

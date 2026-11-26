@@ -11,6 +11,10 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class LLMClient(Protocol):
+    async def ping(self) -> bool:
+        """Connectivity probe — True when the provider is reachable."""
+        ...
+
     async def complete(
         self,
         *,

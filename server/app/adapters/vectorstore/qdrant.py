@@ -44,6 +44,11 @@ class QdrantVectorStore:
         self._client = QdrantClient(url=self._url, api_key=self._api_key, timeout=self._timeout)
         return self._client
 
+    async def ping(self) -> bool:
+        client = self._get_client()
+        client.get_collections()
+        return True
+
     async def search(
         self,
         query: str,

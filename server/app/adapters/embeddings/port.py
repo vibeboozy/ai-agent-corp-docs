@@ -11,6 +11,10 @@ from typing import Protocol, runtime_checkable
 
 @runtime_checkable
 class EmbeddingsClient(Protocol):
+    async def ping(self) -> bool:
+        """Connectivity probe — True when the provider is reachable."""
+        ...
+
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         """Return dense vectors for each text."""
         ...

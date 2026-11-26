@@ -22,6 +22,9 @@ class StubVectorStore:
     def __init__(self, kb: FixtureKB | None = None) -> None:
         self._kb = kb or SHARED_FIXTURE_KB
 
+    async def ping(self) -> bool:
+        return True
+
     async def search(
         self,
         query: str,

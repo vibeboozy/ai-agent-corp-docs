@@ -33,6 +33,24 @@ class HttpDoclingClient:
             if host and host not in self._allow_hosts:
                 raise AppError(f"Docling host not allowlisted: {host}", code="EGRESS_DENIED")
 
+    async def ping(self) -> bool:
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
+                # Prefer /health; fall back to base URL reachability.
+                for path in ("/health", "/", ""):
+                    url = f"{self._base_url}{path}" if path else self._base_url
+                    resp = await client.get(url, headers=headers)
+                    if resp.status_code < 500:
+                        return True
+                return False
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeoutError("Docling ping timed out") from exc
+        except httpx.HTTPError as exc:
+            raise AppError("Docling ping failed", code="UPSTREAM_ERROR") from exc
+
     async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict[str, Any]:
         headers = {"Content-Type": "application/json"}
         if self._api_key:

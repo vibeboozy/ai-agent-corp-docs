@@ -23,5 +23,7 @@ def test_openapi_lists_v1_paths(client: TestClient) -> None:
         "/api/v1/appeals/{appeal_id}/messages",
         "/api/v1/appeals/{appeal_id}/officer-reply",
         "/api/v1/stats",
+        "/api/v1/health/dependencies",
+        "/health/dependencies",
     ):
         assert path in paths

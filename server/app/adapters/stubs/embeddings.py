@@ -21,6 +21,9 @@ class StubEmbeddingsClient:
     def __init__(self, dim: int = 32) -> None:
         self._dim = dim
 
+    async def ping(self) -> bool:
+        return True
+
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         out: list[list[float]] = []
         for text in texts:

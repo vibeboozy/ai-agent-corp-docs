@@ -14,6 +14,7 @@
 | REST | Appeals/messages/officer-reply/stats per `CLIENT_INFO.md` |
 | Persistence | `StubPersistence` (default); `SqlAlchemyPersistence` + Alembic when stubs off |
 | Logging | JSON logs + `X-Request-Id` middleware; appeal audit events |
+| Connectivity | `rag-server check` + `GET /health/dependencies` (stubs always OK) |
 
 ## Workflow & run commands
 
@@ -37,6 +38,8 @@ cp .env.example .env
 # Keep USE_STUBS=true and *_USE_STUB=true for local/CI.
 ```
 
+**Docs corpus (local only):** set `DOCS_CORPUS_PATH` (default `docs`) or `DOCS_DIR`. The folder is **gitignored** — create it locally for ingest (`mkdir -p docs`); do not commit regulation files.
+
 ### 3. Run API
 
 ```bash
@@ -44,18 +47,30 @@ set -a && source .env && set +a
 USE_STUBS=true uvicorn app.main:app --reload --host "${APP_HOST}" --port "${APP_PORT}"
 ```
 
-- Health: `GET /health` and `GET /api/v1/health`
-- OpenAPI: `/docs`
+- Liveness: `GET /health` and `GET /api/v1/health`
+- Dependencies: `GET /health/dependencies` (also under `/api/v1/…`) — per-service ok/fail + stub|live
+- OpenAPI: `/docs` (FastAPI UI; unrelated to corpus path)
 - Contract: [`CLIENT_INFO.md`](CLIENT_INFO.md)
 - Scripted demo: [`DEMO.md`](DEMO.md)
 
-### 4. Tests (default = stubs)
+### 4. Connectivity check (CLI)
+
+```bash
+USE_STUBS=true rag-server check
+# or: python -m app.cli check
+```
+
+Prints `overall` plus lines for `llm`, `embeddings`, `qdrant`, `docling`, `postgres`. Exit `0` when all OK. With stubs, all should report `mode=stub` and `OK`. Live mode uses the same command after flipping the matching `*_USE_STUB=false` flags.
+
+### 5. Tests (default = stubs)
 
 ```bash
 USE_STUBS=true pytest
 ```
 
-### 5. Optional live flags
+Connectivity unit tests assert stub pings are healthy. Live pings: `RUN_LIVE_LLM`, `RUN_LIVE_EMBEDDINGS`, `RUN_LIVE_QDRANT`, `RUN_LIVE_DOCLING`, `RUN_LIVE_POSTGRES`.
+
+### 6. Optional live flags
 
 ```bash
 USE_STUBS=false PERSISTENCE_USE_STUB=false RUN_LIVE_POSTGRES=1 pytest -m integration
@@ -65,7 +80,7 @@ USE_STUBS=false RUN_LIVE_E2E=1 pytest -m integration
 
 Live suites **skip** when flags/secrets are absent.
 
-### 6. Alembic (when using Postgres)
+### 7. Alembic (when using Postgres)
 
 ```bash
 # DATABASE_URL=postgresql+asyncpg://...

@@ -37,6 +37,19 @@ class HttpEmbeddingsClient:
             if host and host not in self._allow_hosts:
                 raise AppError(f"Embeddings host not allowlisted: {host}", code="EGRESS_DENIED")
 
+    async def ping(self) -> bool:
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
+                resp = await client.get(f"{self._base_url}/models", headers=headers)
+                return resp.status_code < 500
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeoutError("Embeddings ping timed out") from exc
+        except httpx.HTTPError as exc:
+            raise AppError("Embeddings ping failed", code="UPSTREAM_ERROR") from exc
+
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         return await self._embed(self._dense_model, texts)
 

@@ -19,6 +19,9 @@ from app.adapters.docling.port import DoclingClient
 class StubDoclingClient:
     """Simple paragraph splitter standing in for Docling HTTP."""
 
+    async def ping(self) -> bool:
+        return True
+
     async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict[str, Any]:
         body = text or (f"[stub convert of {source_path}]" if source_path else "")
         paragraphs = [p.strip() for p in body.split("\n") if p.strip()] or [body]

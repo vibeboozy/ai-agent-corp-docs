@@ -25,6 +25,7 @@ from app.adapters.stubs import (
 )
 from app.adapters.stubs.fixtures import SHARED_FIXTURE_KB
 from app.application.appeals.service import AppealsService
+from app.application.connectivity.service import ConnectivityService
 from app.application.dialogue.nodes import DialogueDeps
 from app.application.dialogue.service import DialogueService
 from app.application.grounding.service import GroundingService
@@ -52,6 +53,7 @@ class Container:
     learning: LearningService
     ingest: IngestService
     quality_escalation: QualityEscalationService
+    connectivity: ConnectivityService
 
 
 def _build_llm(settings: Settings) -> Any:
@@ -197,6 +199,20 @@ def build_container(settings: Settings | None = None) -> Container:
     )
     learning = LearningService(persistence=persistence, ingest=ingest)
     appeals = AppealsService(persistence=persistence, dialogue=dialogue)
+    connectivity = ConnectivityService(
+        llm=llm,
+        embeddings=embeddings,
+        vectorstore=vectorstore,
+        docling=docling,
+        persistence=persistence,
+        stub_flags={
+            "llm": settings.stub_for("llm"),
+            "embeddings": settings.stub_for("embeddings"),
+            "vectorstore": settings.stub_for("vectorstore"),
+            "docling": settings.stub_for("docling"),
+            "persistence": settings.stub_for("persistence"),
+        },
+    )
 
     # Keep libreoffice constructed for DI completeness (used by future ingest CLI).
     _ = libreoffice
@@ -215,6 +231,7 @@ def build_container(settings: Settings | None = None) -> Container:
         learning=learning,
         ingest=ingest,
         quality_escalation=quality,
+        connectivity=connectivity,
     )
 
 

@@ -20,6 +20,9 @@ _VAGUE = ("помогите", "что делать", "не знаю", "вопр�
 class StubLLMClient:
     """Heuristic stub LLM for specificity + grounded drafting."""
 
+    async def ping(self) -> bool:
+        return True
+
     async def complete(
         self,
         *,
