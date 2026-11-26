@@ -26,7 +26,15 @@ class _FakeLLM:
 
     def __init__(self, *, label: str = "underspecified") -> None:
         self._label = label
-        self.complete = AsyncMock(return_value="Согласно регламенту: РП.")
+        self.complete = AsyncMock(
+            side_effect=self._complete,
+        )
+
+    async def _complete(self, *, system: str, user: str, temperature: float | None = None) -> str:
+        _ = (system, user, temperature)
+        if "Reason:" in user:
+            return "Уточните тему вопроса, пожалуйста."
+        return "Согласно регламенту: РП."
 
     async def classify_specificity(
         self, user_message: str, history: list[str] | None = None
@@ -39,24 +47,35 @@ class _FakeEmbeddings:
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         return [[0.1, 0.2] for _ in texts]
 
+    async def embed_sparse(self, texts: list[str]) -> list[dict[str, float]]:
+        return [{"токен": 1.0} for _ in texts]
+
 
 class _FakeVectorStore:
     def __init__(self, hits: list[dict[str, Any]]) -> None:
         self._hits = hits
+        self.search_calls = 0
 
     async def search(
-        self, query: str, *, limit: int = 5, dense_vector: list[float] | None = None
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        dense_vector: list[float] | None = None,
+        sparse_vector: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
-        _ = (query, limit, dense_vector)
+        _ = (query, limit, dense_vector, sparse_vector)
+        self.search_calls += 1
         return list(self._hits)
 
 
 def _deps(*, label: str, hits: list[dict[str, Any]]) -> DialogueDeps:
+    store = _FakeVectorStore(hits)
     return DialogueDeps(
         llm=_FakeLLM(label=label),
         retrieval=RetrievalService(
             embeddings=_FakeEmbeddings(),
-            vectorstore=_FakeVectorStore(hits),
+            vectorstore=store,
             rerank_min_score=0.0,
         ),
         grounding=GroundingService(min_citations=1, min_score=0.0),
@@ -107,7 +126,8 @@ async def test_specific_role_topic_with_hits_answers_despite_timid_llm() -> None
     assert out["outcome"] == "answer", out["node_trace"]
     assert out["grounded"] is True
     assert out["citations"]
-    assert any("assess:specific" in t for t in out["node_trace"])
+    assert out["raw_specificity"] == "underspecified"
+    assert any("assess:specific(raw:underspecified)" in t for t in out["node_trace"])
     assert "retrieve:hits=1" in out["node_trace"]
 
 
@@ -124,8 +144,9 @@ async def test_underspecified_without_topic_still_clarifies() -> None:
     )
     assert out["outcome"] == "clarify"
     assert out["clarify_reason"] == "underspecified"
-    # Must not retrieve on true underspecified — hits must not short-circuit clarify.
-    assert not any(t.startswith("retrieve:") for t in out["node_trace"])
+    # Retrieve-before: retrieval runs, but hits must not short-circuit true underspecified.
+    assert any(t.startswith("retrieve:") for t in out["node_trace"])
+    assert any(t.startswith("clarify:") for t in out["node_trace"])
 
 
 @pytest.mark.asyncio

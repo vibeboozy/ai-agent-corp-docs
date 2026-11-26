@@ -1,4 +1,4 @@
 """
 ANCHOR: tests.integration
-PURPOSE: Live-gated integration / e2e tests (skip without RUN_LIVE_*).
+PURPOSE: Live integration / e2e tests (run when services reachable via Settings).
 """

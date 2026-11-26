@@ -82,14 +82,16 @@ rag-server ingest-docx /path/to/reg.docx --title "Procurement"
 pytest
 ```
 
-Default CI runs unit/contract tests (mocked HTTP where needed). Live suites **skip** unless flags are set: `RUN_LIVE_LLM`, `RUN_LIVE_EMBEDDINGS`, `RUN_LIVE_QDRANT`, `RUN_LIVE_DOCLING`, `RUN_LIVE_POSTGRES`, `RUN_LIVE_TESTS`, `RUN_LIVE_E2E`.
+Default CI runs unit/contract tests (mocked HTTP where needed). Integration/e2e
+tests run when dependencies answer ping via normal `.env` / Settings config;
+they **skip** when infra is unreachable — no `RUN_LIVE_*` env flags.
 
-### 6. Optional live flags
+### 6. Optional live suites
 
 ```bash
-RUN_LIVE_POSTGRES=1 pytest -m integration
-RUN_LIVE_LLM=1 RUN_LIVE_EMBEDDINGS=1 pytest -m integration
-RUN_LIVE_E2E=1 pytest -m e2e
+pytest -m integration   # per-service smoke when reachable
+pytest -m e2e            # full appeal path when core stack is up
+rag-server check
 ```
 
 ### 7. Alembic (Postgres)

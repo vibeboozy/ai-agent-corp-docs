@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Testing rules — unit/mocked HTTP by default; live LLM/embeddings/Qdrant/Docling gated by env.
+  Testing rules — unit/mocked HTTP by default; live when services reachable via Settings.
   Scope: server/
 -->
 <testing_rules scope="server">
@@ -10,12 +10,14 @@
       Framework: pytest + pytest-asyncio. Prefer httpx ASGITransport for API tests.
     </rule>
     <rule id="TEST-GEN-02">
-      Default CI: RUN_LIVE_*=0. Unit/contract tests must not require network to
+      Default CI: unit/contract tests must not require network to
       LLM/embeddings/Qdrant/Docling/Postgres.
     </rule>
     <rule id="TEST-GEN-03">
       Markers: unit (default), contract, behavior, integration, e2e, demo.
-      Live suites use @pytest.mark.integration and/or @pytest.mark.e2e and skip unless the matching RUN_LIVE_* flag is set.
+      Live suites use @pytest.mark.integration and/or @pytest.mark.e2e and skip
+      unless the required services answer ping via normal Settings config
+      (no RUN_LIVE_* env flags).
     </rule>
     <rule id="TEST-GEN-04">
       Prefer deterministic mocked HTTP / MagicMock ports for unit tests; no wall-clock flakiness.
@@ -36,7 +38,8 @@
       LLM mocks can return scripted clarify vs answer drafts; grounding must still enforce citations from retrieval mocks.
     </rule>
     <rule id="TEST-UNIT-04">
-      Assert graph routing: underspecified → clarify; supported hits → answer; empty/unsupported → escalate.
+      Assert graph routing: assess→retrieve always; underspecified without role+topic → clarify;
+      specific / role+topic → ground; empty/unsupported → escalate. Clarifications are LLM-generated.
     </rule>
   </section>
 
@@ -48,11 +51,11 @@
       OpenAPI schema generation must succeed in CI; breaking field renames require version bump discussion.
     </rule>
     <rule id="TEST-API-03">
-      Persistence durability tests use Postgres via RUN_LIVE_POSTGRES=1. No shared mutable DB state across tests.
+      Persistence durability tests use Postgres when DATABASE_URL answers ping. No shared mutable DB state across tests.
     </rule>
     <rule id="TEST-API-04">
       Restart durability: with Postgres, create appeal/messages, dispose engine,
-      reconnect, assert history and stats still present (integration / RUN_LIVE_POSTGRES).
+      reconnect, assert history and stats still present (integration when Postgres reachable).
     </rule>
   </section>
 
@@ -75,21 +78,20 @@
     </rule>
   </section>
 
-  <section id="live_flags" title="Live test environment flags">
+  <section id="live_readiness" title="Live test readiness (no env flags)">
     <rule id="TEST-LIVE-01">
-      Master switch: RUN_LIVE_TESTS=1 enables the integration marker suite (still respects per-service readiness).
+      Do not use RUN_LIVE_* skip-by-env. Live tests either run when services are reachable
+      via Settings, or are plain unit tests with mocks.
     </rule>
     <rule id="TEST-LIVE-02">
-      Per-service gates (smoke): RUN_LIVE_LLM=1, RUN_LIVE_EMBEDDINGS=1, RUN_LIVE_QDRANT=1, RUN_LIVE_DOCLING=1,
-      RUN_LIVE_POSTGRES=1. Each test skips unless its gate is set AND required URL/key env vars are non-empty
-      (DATABASE_URL for Postgres).
+      Per-service smoke: skip unless llm / embeddings / qdrant / docling / postgres ping succeeds.
     </rule>
     <rule id="TEST-LIVE-03">
-      Full product path: RUN_LIVE_E2E=1 requires keys for LLM + embeddings + Qdrant + Postgres at minimum;
+      Full product path (e2e): requires LLM + embeddings + Qdrant + Postgres at minimum;
       Docling required only for ingest scenarios.
     </rule>
     <rule id="TEST-LIVE-04">
-      Missing flags or secrets → pytest.skip with a clear reason. Never fail CI because live infra is absent.
+      Unreachable services → pytest.skip with a clear reason. Never fail CI because live infra is absent.
     </rule>
     <rule id="TEST-LIVE-05">
       Before live runs: copy .env.example → .env, set real base URLs/keys.
@@ -104,13 +106,13 @@
       Embeddings: embed a short Russian string; assert dense dim == EMBEDDINGS_DENSE_DIM; sparse vector present if API returns it.
     </rule>
     <rule id="TEST-SMOKE-03">
-      Qdrant: ensure collection/alias reachable; upsert one fixture point; search returns it; cleanup or use dedicated test collection.
+      Qdrant: ensure named dense+sparse collection; upsert one fixture point; hybrid search returns it.
     </rule>
     <rule id="TEST-SMOKE-04">
       Docling: convert a tiny fixture docx (or PDF); assert chunks non-empty; honor DOCLING_TIMEOUT_S.
     </rule>
     <rule id="TEST-SMOKE-05">
-      LibreOffice: optional; skip if soffice binary missing even when RUN_LIVE_DOCLING=1 unless RUN_LIVE_LIBREOFFICE=1.
+      LibreOffice: optional; skip if soffice binary missing.
     </rule>
     <rule id="TEST-SMOKE-06">
       Postgres: connect via DATABASE_URL; insert/select appeal+message; assert row survives new session (restart durability).
@@ -139,16 +141,16 @@
     <rule id="TEST-E2E-06">
       Example commands (from server/):
       pytest
-      RUN_LIVE_LLM=1 RUN_LIVE_EMBEDDINGS=1 pytest -m integration
-      RUN_LIVE_TESTS=1 pytest -m integration
-      RUN_LIVE_E2E=1 pytest -m e2e
+      pytest -m integration
+      pytest -m e2e
       rag-server check
     </rule>
   </section>
 
   <section id="forbidden" title="Forbidden in default CI">
     <rule id="TEST-NO-01">
-      No real HTTP to LLM_BASE_URL / EMBEDDINGS_BASE_URL / QDRANT_URL / DOCLING_BASE_URL unless a RUN_LIVE_* flag is set.
+      No real HTTP to LLM_BASE_URL / EMBEDDINGS_BASE_URL / QDRANT_URL / DOCLING_BASE_URL in default unit tests.
+      Integration/e2e may call them only when those services answer ping.
     </rule>
     <rule id="TEST-NO-02">
       No dependency on soffice binary in default unit tests.
@@ -166,7 +168,7 @@
       Provide pytest markers or scripts for the three prototype success criteria (grounded, clarify, learn) against live infra.
     </rule>
     <rule id="TEST-DEMO-02">
-      Same scenarios should be invokable with RUN_LIVE_E2E=1 when infra is available; document path in README / DEMO.md.
+      Same scenarios should be invokable with pytest -m e2e when infra is available; document path in README / DEMO.md.
     </rule>
   </section>
 

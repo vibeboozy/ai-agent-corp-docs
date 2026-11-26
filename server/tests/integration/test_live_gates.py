@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.integration.test_live_gates
-PURPOSE: Live-gated smoke — skip unless RUN_LIVE_* set.
+PURPOSE: Live smoke — run when services reachable via Settings; else skip.
 Dependencies: settings / real adapters
 """
 
@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import env_flag
+from tests.conftest import require_services
 
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skipif(not env_flag("RUN_LIVE_POSTGRES"), reason="RUN_LIVE_POSTGRES not set")
 @pytest.mark.asyncio
 async def test_live_postgres_ping() -> None:
+    require_services("postgres")
     from app.config.factories import build_container
     from app.config.settings import Settings, clear_settings_cache
 
@@ -25,9 +25,9 @@ async def test_live_postgres_ping() -> None:
     assert await container.persistence.ping() is True
 
 
-@pytest.mark.skipif(not env_flag("RUN_LIVE_LLM"), reason="RUN_LIVE_LLM not set")
 @pytest.mark.asyncio
 async def test_live_llm_complete() -> None:
+    require_services("llm")
     from app.config.factories import build_container
     from app.config.settings import Settings, clear_settings_cache
 
@@ -37,15 +37,16 @@ async def test_live_llm_complete() -> None:
     assert isinstance(text, str) and text
 
 
-@pytest.mark.skipif(not env_flag("RUN_LIVE_QDRANT"), reason="RUN_LIVE_QDRANT not set")
 @pytest.mark.asyncio
 async def test_live_qdrant_ensure_and_roundtrip() -> None:
+    require_services("qdrant", "embeddings")
     from app.config.factories import build_container
     from app.config.settings import Settings, clear_settings_cache
 
     clear_settings_cache()
     container = build_container(Settings())
     vec = await container.embeddings.embed_dense(["smoke live qdrant"])
+    sparse = await container.embeddings.embed_sparse(["smoke live qdrant"])
     assert vec and len(vec[0]) >= 8
     await container.vectorstore.upsert(
         [
@@ -54,19 +55,23 @@ async def test_live_qdrant_ensure_and_roundtrip() -> None:
                 "chunk_id": "live-smoke-chunk",
                 "text": "smoke live qdrant",
                 "dense_vector": vec[0],
+                "sparse_vector": sparse[0] if sparse else None,
                 "source": "ingest",
             }
         ]
     )
     hits = await container.vectorstore.search(
-        "smoke live qdrant", limit=3, dense_vector=vec[0]
+        "smoke live qdrant",
+        limit=3,
+        dense_vector=vec[0],
+        sparse_vector=sparse[0] if sparse else None,
     )
     assert isinstance(hits, list)
 
 
-@pytest.mark.skipif(not env_flag("RUN_LIVE_DOCLING"), reason="RUN_LIVE_DOCLING not set")
 @pytest.mark.asyncio
 async def test_live_docling_text_convert() -> None:
+    require_services("docling")
     from app.config.factories import build_container
     from app.config.settings import Settings, clear_settings_cache
 
@@ -77,10 +82,10 @@ async def test_live_docling_text_convert() -> None:
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(not env_flag("RUN_LIVE_E2E"), reason="RUN_LIVE_E2E not set")
 @pytest.mark.asyncio
 async def test_live_e2e_appeal_roundtrip() -> None:
     """Smoke: create appeal with first message against live stack; assert response shape."""
+    require_services("llm", "embeddings", "qdrant", "postgres")
     from app.config.factories import build_container
     from app.config.settings import Settings, clear_settings_cache
 

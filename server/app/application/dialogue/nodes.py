@@ -6,12 +6,14 @@ CRITICAL: Nodes must call ports — never hard-code Http* (CS-LG-02).
 DO:
 - Same node functions for all DI-wired adapters
 - Record LLM/retrieval latency and clarify/escalate reasons for audit
+- Log raw classify labels; generate clarifications via LLM (no hardcoded RU templates)
 DONT:
 - Return ungrounded final answers
 """
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -21,6 +23,8 @@ from app.application.dialogue.specificity import prefer_specific_label
 from app.application.dialogue.state import DialogueState
 from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -50,16 +54,21 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         user_message = state.get("user_message", "") or ""
         history = list(state.get("history") or [])
         raw_label = await deps.llm.classify_specificity(user_message, history=history)
-        # Conservative: role+topic questions must retrieve (not clarify), even when
+        # Conservative: role+topic questions must retrieve/answer (not clarify), even when
         # the LLM timidly returns underspecified/ambiguous.
         label = prefer_specific_label(raw_label, user_message, history)
         assess_ms = round((time.perf_counter() - t0) * 1000, 2)
-        trace = f"assess:{label}"
-        if label != raw_label:
-            trace = f"assess:{label}(was:{raw_label})"
+        logger.info(
+            "classify_specificity raw=%r final=%r message=%r",
+            raw_label,
+            label,
+            user_message[:200],
+        )
+        trace = f"assess:{label}(raw:{raw_label})"
         return {
             **state,
             "specificity": label,
+            "raw_specificity": str(raw_label),
             "latency_ms": _merge_latency(state, llm_assess_ms=assess_ms),
             "node_trace": _trace(state, trace),
         }
@@ -79,22 +88,43 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         specificity = state.get("specificity") or "underspecified"
         if specificity == "ambiguous":
             reason = "ambiguous"
-            text = (
-                "Уточните, пожалуйста: речь о договорах на закупку или о договорах "
-                "с подрядчиками? От этого зависит применимый регламент."
+            hint = (
+                "The question maps to multiple regulation scopes. Ask which scope "
+                "the user means (one short Russian clarifying question)."
             )
         else:
             reason = "underspecified"
-            text = (
-                "Вопрос сформулирован недостаточно конкретно. Укажите, пожалуйста, "
-                "тип процесса (закупка, подряд, отпуск и т.п.) и что именно нужно узнать."
+            hint = (
+                "The question is underspecified. Ask for the missing process/topic "
+                "so retrieval can run (one short Russian clarifying question)."
             )
+        hist = "\n".join(list(state.get("history") or [])[-4:])
+        user_message = state.get("user_message") or ""
+        t0 = time.perf_counter()
+        text = await deps.llm.complete(
+            system=(
+                "You are a corporate regulations assistant. "
+                "Reply with ONLY the clarifying question in Russian — no preamble."
+            ),
+            user=(
+                f"{hint}\n"
+                f"Reason: {reason}\n"
+                f"History:\n{hist}\n"
+                f"Question:\n{user_message}"
+            ),
+            temperature=0.2,
+        )
+        clarify_ms = round((time.perf_counter() - t0) * 1000, 2)
+        text = (text or "").strip() or (
+            "Уточните, пожалуйста, тему и что именно нужно узнать."
+        )
         return {
             **state,
             "clarify_turns": turns,
             "clarification_text": text,
             "clarify_reason": reason,
             "outcome": "clarify",
+            "latency_ms": _merge_latency(state, llm_clarify_ms=clarify_ms),
             "node_trace": _trace(state, f"clarify:{reason}"),
         }
 

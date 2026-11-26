@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.api.test_health_dependencies
-PURPOSE: HTTP dependency connectivity report shape; live OK gated by RUN_LIVE_*.
+PURPOSE: HTTP dependency connectivity report shape; live OK when services up.
 Dependencies: app.main
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import env_flag
+from tests.conftest import require_all_core_services
 
 
 def test_health_dependencies_endpoint_shape(client: TestClient) -> None:
@@ -26,11 +26,8 @@ def test_health_dependencies_endpoint_shape(client: TestClient) -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not env_flag("RUN_LIVE_TESTS"),
-    reason="RUN_LIVE_TESTS not set",
-)
 def test_health_dependencies_all_ok(client: TestClient) -> None:
+    require_all_core_services()
     resp = client.get("/health/dependencies")
     assert resp.status_code == 200
     body = resp.json()

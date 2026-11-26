@@ -2,13 +2,13 @@
 <!--
   Phased development plan for the Corporate RAG AI-Agent server.
   Implement in order. Each phase ends with acceptance checks before the next.
-  Real adapters only — live suites gated by RUN_LIVE_*.
+  Real adapters only — live suites when services reachable via Settings.
 -->
 <dev_plan project="ai-agent-corp-docs" scope="server">
 
   <principles>
     <item>Do not skip grounding/escalation for demo speed.</item>
-    <item>Always wire real LLM/embeddings/Qdrant/Docling/Postgres clients; live suites gated by RUN_LIVE_*.</item>
+    <item>Always wire real LLM/embeddings/Qdrant/Docling/Postgres clients; live suites when services reachable via Settings.</item>
     <item>Keep REST contracts stable after phase 1; version if breaking.</item>
     <item>Russian user-facing copy OK; identifiers English.</item>
     <item>All product work under server/ (rules, context, app, tests).</item>
@@ -55,7 +55,7 @@
       <check>Create appeal → post message → restart app → GET messages returns same history</check>
       <check>GET /appeals filters by status</check>
       <check>Audit trail rows present for mutations</check>
-      <check>Optional RUN_LIVE_POSTGRES integration</check>
+      <check>Optional Postgres integration when reachable</check>
     </acceptance>
   </phase>
 
@@ -68,7 +68,7 @@
     </goals>
     <deliverables>
       <item>StateGraph nodes wired to grounding + quality_escalation + ports</item>
-      <item>Live/e2e behavior tests gated by RUN_LIVE_E2E</item>
+      <item>Live/e2e behavior tests when core stack is up</item>
     </deliverables>
     <acceptance>
       <check>Known corpus question → answer with citations</check>
@@ -83,7 +83,7 @@
     <goals>
       <goal>HttpLLM, HttpEmbeddings, QdrantVectorStore, HttpDocling, LibreOffice adapters are the only path.</goal>
       <goal>Timeouts, batch sizes, and error mapping from env.</goal>
-      <goal>tests/integration/ with RUN_LIVE_* skips when secrets/infra absent.</goal>
+      <goal>tests/integration/ skip when services unreachable.</goal>
       <goal>Keep rag-server check + /health/dependencies for live probes.</goal>
     </goals>
     <deliverables>
@@ -93,8 +93,8 @@
       <item>Document how to run live tests in README / testing_rules</item>
     </deliverables>
     <acceptance>
-      <check>CI green with RUN_LIVE_*=0 (live suites skip)</check>
-      <check>With secrets present, RUN_LIVE_* reaches real services</check>
+      <check>CI green offline; live suites skip when unreachable</check>
+      <check>With .env configured, integration reaches real services</check>
       <check>Failures surface as typed errors; no secret leakage in logs</check>
     </acceptance>
   </phase>
@@ -122,7 +122,7 @@
       <goal>POST officer-reply stores canonical answer, resolves escalation, triggers KB update.</goal>
       <goal>Subsequent similar questions can be answered from updated KB.</goal>
       <goal>Log all learning events.</goal>
-      <goal>RUN_LIVE_E2E learning scenario (skips without infra).</goal>
+      <goal>e2e learning scenario (skips without infra).</goal>
     </goals>
     <deliverables>
       <item>learning service wired to ingest</item>
@@ -132,7 +132,7 @@
       <check>Success criterion 3 demonstrable end-to-end with live infra</check>
       <check>Appeal status resolved_by_officer / closed as designed</check>
       <check>Audit contains officer + ingest linkage</check>
-      <check>Live e2e learning test skips cleanly without RUN_LIVE_E2E</check>
+      <check>Live e2e learning test skips cleanly when infra down</check>
     </acceptance>
   </phase>
 
@@ -158,7 +158,7 @@
       <goal>Scripted scenarios covering all three success criteria against live services.</goal>
       <goal>Demo script (curl or pytest marker e2e).</goal>
       <goal>Document demo path for stakeholders (Russian narrative OK).</goal>
-      <goal>Document RUN_LIVE_E2E path in DEMO.md / README.</goal>
+      <goal>Document live e2e path in DEMO.md / README.</goal>
     </goals>
     <deliverables>
       <item>scenarios: grounded answer; clarify then answer; escalate + officer learn</item>

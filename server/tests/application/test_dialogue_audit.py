@@ -84,7 +84,10 @@ async def test_retrieve_node_records_rerank_and_latency() -> None:
             "score": 0.8,
         }
     ]
-    emb = AsyncMock(embed_dense=AsyncMock(return_value=[[0.1]]))
+    emb = AsyncMock(
+        embed_dense=AsyncMock(return_value=[[0.1]]),
+        embed_sparse=AsyncMock(return_value=[{"q": 1.0}]),
+    )
     vs = AsyncMock(search=AsyncMock(return_value=hits))
     deps = DialogueDeps(
         llm=AsyncMock(),
@@ -165,7 +168,10 @@ async def test_dialogue_service_persists_enriched_audit() -> None:
     deps = DialogueDeps(
         llm=_LLM(),
         retrieval=RetrievalService(
-            embeddings=AsyncMock(embed_dense=AsyncMock(return_value=[[0.1]])),
+            embeddings=AsyncMock(
+                embed_dense=AsyncMock(return_value=[[0.1]]),
+                embed_sparse=AsyncMock(return_value=[{"q": 1.0}]),
+            ),
             vectorstore=AsyncMock(search=AsyncMock(return_value=hits)),
         ),
         grounding=GroundingService(min_citations=1, min_score=0.0),
@@ -200,12 +206,15 @@ async def test_graph_clarify_sets_reason() -> None:
         ) -> str:
             return "underspecified"
 
-        complete = AsyncMock()
+        complete = AsyncMock(return_value="Уточните тему, пожалуйста.")
 
     deps = DialogueDeps(
         llm=_LLM(),
         retrieval=RetrievalService(
-            embeddings=AsyncMock(embed_dense=AsyncMock(return_value=[[0.1]])),
+            embeddings=AsyncMock(
+                embed_dense=AsyncMock(return_value=[[0.1]]),
+                embed_sparse=AsyncMock(return_value=[{"q": 1.0}]),
+            ),
             vectorstore=AsyncMock(search=AsyncMock(return_value=[])),
         ),
         grounding=GroundingService(),

@@ -1,4 +1,4 @@
 """
 ANCHOR: tests
-PURPOSE: Test package root — unit tests offline; live suites gated by RUN_LIVE_*.
+PURPOSE: Test package root — unit tests offline; live suites when services available.
 """

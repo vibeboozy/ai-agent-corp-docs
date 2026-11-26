@@ -17,6 +17,10 @@ Connectivity: `rag-server check` (or `python -m app.cli check`) — expect `over
 **Body shapes:** `POST /appeals` nests the first message as `{"message":{"content":"..."}}`.
 `POST /appeals/{id}/messages` takes a **flat** body `{"content":"..."}` (not nested under `message`).
 
+**Qdrant:** collection uses named vectors `dense` + `sparse` (hybrid RRF). On first
+upsert/search the server recreates a collection that still has unnamed Default 1024.
+Re-ingest corpus after schema recreate: `rag-server ingest-docx …`.
+
 ## 1. Grounded answer
 
 ```bash
@@ -30,7 +34,7 @@ Expect: `status=answered`, assistant `message_kind=answer` with non-empty `citat
 ## 2. Clarify then answer
 
 ```bash
-# ambiguous first turn
+# underspecified first turn
 curl -s http://127.0.0.1:8000/api/v1/appeals -H 'Content-Type: application/json' \
   -d '{"message":{"content":"Кто отвечает за организацию?"}}' | python3 -m json.tool
 
@@ -40,7 +44,8 @@ curl -s http://127.0.0.1:8000/api/v1/appeals/APPEAL_ID/messages \
   -d '{"content":"Это про отчётность по проекту."}' | python3 -m json.tool
 ```
 
-Expect: first turn `clarifying`; after clarification `answered` + citations.
+Expect: first turn `clarifying` (LLM-generated clarification text); after clarification
+`answered` + citations.
 
 ## 3. Escalate + officer learning
 
@@ -50,10 +55,10 @@ Expect: first turn `clarifying`; after clarification `answered` + citations.
 # create a new appeal asking the logo color again → answered from learned KB
 ```
 
-Automated (skips without infra): `RUN_LIVE_E2E=1 pytest -m e2e`
+Automated when infra is up: `pytest -m e2e` (skips if services unreachable).
+Offline DEMO dialogue paths: `pytest tests/application/test_demo_scenarios.py`.
 
-## Live flags
+## Live checks
 
-Per-adapter smoke: `RUN_LIVE_LLM=1`, `RUN_LIVE_EMBEDDINGS=1`, `RUN_LIVE_QDRANT=1`,
-`RUN_LIVE_DOCLING=1`, `RUN_LIVE_POSTGRES=1`. Full path: `RUN_LIVE_E2E=1`.
-See `.env.example` and `rules/testing_rules.xml`. Live suites **skip** when flags are unset.
+No `RUN_LIVE_*` flags. Configure `.env`, then `rag-server check` / `pytest -m integration`.
+See `rules/testing_rules.xml`. Live suites **skip** when services do not answer ping.

@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.adapters.test_cli
-PURPOSE: rag-server / python -m app.cli check entrypoints (gated by RUN_LIVE_TESTS).
+PURPOSE: rag-server / python -m app.cli check entrypoints (when deps reachable).
 Dependencies: app.cli
 """
 
@@ -9,13 +9,10 @@ from __future__ import annotations
 import pytest
 
 from app.cli import main
-from tests.conftest import env_flag
+from tests.conftest import require_all_core_services
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(
-    not env_flag("RUN_LIVE_TESTS"),
-    reason="RUN_LIVE_TESTS not set (CLI check needs live deps)",
-)
 def test_cli_check_exits_zero() -> None:
+    require_all_core_services()
     assert main(["check"]) == 0
