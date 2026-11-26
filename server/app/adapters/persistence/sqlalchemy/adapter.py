@@ -243,7 +243,12 @@ class SqlAlchemyPersistence:
                 session,
                 appeal_id=appeal_id,
                 event_type="escalation_created",
-                payload={"escalation_id": str(row.id)},
+                payload={
+                    "escalation_id": str(row.id),
+                    "reason": reason,
+                    "channel": channel,
+                    "status": status.value,
+                },
             )
             await session.commit()
             await session.refresh(row)

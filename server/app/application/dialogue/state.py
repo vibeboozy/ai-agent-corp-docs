@@ -27,7 +27,12 @@ class DialogueState(TypedDict, total=False):
     draft_answer: str
     citations: list[dict[str, Any]]
     clarification_text: str
+    clarify_reason: str  # underspecified | ambiguous | max_clarify_exceeded
     escalation_reason: str
     outcome: str  # clarify | answer | escalate
     node_trace: list[str]
     quality_email: str
+    # Observability for audit_events.payload
+    latency_ms: dict[str, float]
+    rerank_mode: str
+    rerank_scores: list[dict[str, Any]]

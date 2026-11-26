@@ -103,9 +103,13 @@ async def test_rerank_mode_llm_reorders_and_caps_per_doc() -> None:
         rerank_min_score=0.0,
         llm=llm,
     )
-    out = await svc.retrieve("best", limit=5)
+    meta = await svc.retrieve_with_meta("best", limit=5)
+    out = meta.hits
     assert llm.complete.await_count == 1
     assert out[0]["chunk_id"] == "c2"
+    assert meta.rerank_mode == "llm"
+    assert "rerank_ms" in meta.latency_ms
+    assert meta.rerank_scores[0]["chunk_id"] == "c2"
     # max 2 from d1
     d1 = [h for h in out if h["document_id"] == "d1"]
     assert len(d1) <= 2

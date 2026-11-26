@@ -269,8 +269,10 @@ officer-reply (canonical)
 
 ## 7. Observability
 
-- **Request logging:** method, path, status, latency, `request_id`, `appeal_id` when present.
-- **Appeal audit trail:** status transitions, graph node outcomes (clarify / answer / escalate), retrieval hit counts, officer actions — durable in persistence, not only logs.
+- **Request logging:** method, path, status, latency, `request_id`, `appeal_id` when present (stdout; see `LOG_*`).
+- **Appeal audit trail** (`audit_events` JSONB payload): durable in Postgres.
+  - `dialogue_turn`: `outcome`, `node_trace`, `specificity`, `clarify_reason` / `escalation_reason`, `chunk_ids` + citation scores, `rerank.mode` + `rerank.scores`, `latency_ms` (`llm_assess_ms`, `llm_complete_ms`, `retrieval_total_ms` / `embed_ms` / `search_ms` / `rerank_ms`, `turn_total_ms`), `hit_count`.
+  - Also: status transitions, `escalation_created` (with `reason`), officer/learning/ingest events.
 - **LOG_*** env for level, JSON format, redaction flags.
 - **CACHE_*** for optional response/embedding cache (disable across learning updates as needed).
 

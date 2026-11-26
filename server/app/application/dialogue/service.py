@@ -13,11 +13,13 @@ DONT:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from app.adapters.persistence.port import Persistence
+from app.application.dialogue.audit import build_dialogue_turn_audit
 from app.application.dialogue.graph import build_dialogue_graph
 from app.application.dialogue.nodes import DialogueDeps
 from app.application.dialogue.state import DialogueState
@@ -85,10 +87,13 @@ class DialogueService:
             "clarify_turns": clarify_turns,
             "max_clarify_turns": self._max_clarify_turns,
             "node_trace": [],
+            "latency_ms": {},
         }
+        turn_started = time.perf_counter()
         final: dict[str, Any] = await self._graph.ainvoke(initial)
         outcome = str(final.get("outcome") or "escalate")
         node_trace = list(final.get("node_trace") or [])
+        citations = list(final.get("citations") or [])
 
         new_messages: list[Message] = [user_msg]
 
@@ -104,7 +109,6 @@ class DialogueService:
             )
             new_messages.append(assistant)
         elif outcome == "answer":
-            citations = list(final.get("citations") or [])
             assistant = await self._persistence.add_message(
                 appeal_id=appeal_id,
                 role=MessageRole.ASSISTANT,
@@ -134,10 +138,24 @@ class DialogueService:
             appeal = await self._persistence.get_appeal(appeal_id) or appeal
             new_messages.append(assistant)
 
+        latency = dict(final.get("latency_ms") or {})
+        latency["turn_total_ms"] = round((time.perf_counter() - turn_started) * 1000, 2)
+        audit_payload = build_dialogue_turn_audit(
+            outcome=outcome,
+            node_trace=node_trace,
+            specificity=final.get("specificity"),
+            clarify_reason=final.get("clarify_reason"),
+            escalation_reason=final.get("escalation_reason"),
+            citations=citations,
+            candidates=list(final.get("candidates") or []),
+            rerank_mode=final.get("rerank_mode"),
+            rerank_scores=list(final.get("rerank_scores") or []),
+            latency_ms=latency,
+        )
         await self._persistence.add_audit_event(
             appeal_id=appeal_id,
             event_type="dialogue_turn",
-            payload={"outcome": outcome, "node_trace": node_trace},
+            payload=dict(audit_payload),
         )
         return DialogueTurnResult(
             appeal=appeal,

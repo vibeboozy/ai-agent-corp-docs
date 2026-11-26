@@ -13,7 +13,7 @@
 | 3 Continuous learning | Escalate → `officer-reply` → ingest → later answers |
 | REST | Appeals/messages/officer-reply/stats per `CLIENT_INFO.md` |
 | Persistence | `SqlAlchemyPersistence` + Alembic (Postgres) |
-| Logging | JSON logs + `X-Request-Id` middleware; appeal audit events |
+| Logging | JSON logs + `X-Request-Id`; `audit_events` with LLM/retrieval latency, rerank scores, chunk_ids, clarify/escalate reasons |
 | Connectivity | `rag-server check` + `GET /health/dependencies` |
 
 ## Workflow & run commands

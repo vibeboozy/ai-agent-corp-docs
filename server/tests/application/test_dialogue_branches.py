@@ -72,7 +72,8 @@ async def test_graph_underspecified_clarifies() -> None:
     assert out["outcome"] == "clarify"
     assert out["clarification_text"]
     assert "assess:underspecified" in out["node_trace"]
-    assert "clarify" in out["node_trace"]
+    assert any(t.startswith("clarify") for t in out["node_trace"])
+    assert out.get("clarify_reason") == "underspecified"
 
 
 @pytest.mark.asyncio

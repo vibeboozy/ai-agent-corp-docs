@@ -73,6 +73,14 @@ class EscalationRow(Base):
 
 
 class AuditEventRow(Base):
+    """
+    Durable appeal audit trail.
+
+    event_type examples: dialogue_turn, appeal_created, escalation_created, …
+    dialogue_turn payload schema: app.application.dialogue.audit.DialogueTurnAuditPayload
+    (outcome, latency_ms, rerank scores, chunk_ids, clarify/escalation reasons).
+    """
+
     __tablename__ = "audit_events"
 
     id: Mapped[Any] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)

@@ -31,7 +31,11 @@
     <node id="logging" layer="cross-cutting">
       <name>logging</name>
       <path>server/app/logging/</path>
-      <responsibility>Structured request logs; correlation IDs; redaction; appeal audit event helpers</responsibility>
+      <responsibility>
+        Structured request logs; correlation IDs; redaction.
+        Dialogue audit payloads (latency, rerank scores, chunk_ids, clarify/escalate reasons)
+        built in application/dialogue/audit.py → persistence audit_events.
+      </responsibility>
     </node>
 
     <node id="api" layer="api">
