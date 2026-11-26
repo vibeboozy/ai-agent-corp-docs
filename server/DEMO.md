@@ -60,5 +60,5 @@ Offline DEMO dialogue paths: `pytest tests/application/test_demo_scenarios.py`.
 
 ## Live checks
 
-No `RUN_LIVE_*` flags. Configure `.env`, then `rag-server check` / `pytest -m integration`.
+Configure `.env`, then `rag-server check` / `pytest -m integration`.
 See `rules/testing_rules.xml`. Live suites **skip** when services do not answer ping.

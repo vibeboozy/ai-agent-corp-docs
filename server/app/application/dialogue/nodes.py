@@ -1,12 +1,12 @@
 """
 ANCHOR: app.application.dialogue.nodes
-PURPOSE: LangGraph node callables (assess, clarify, retrieve, ground, answer, escalate).
+PURPOSE: LangGraph node callables (assess, refuse, clarify, retrieve, ground, answer, escalate).
 Dependencies: retrieval, grounding, quality_escalation, llm port via DI
 CRITICAL: Nodes must call ports — never hard-code Http* (CS-LG-02).
 DO:
 - Same node functions for all DI-wired adapters
 - Record LLM/retrieval latency and clarify/escalate reasons for audit
-- Log raw classify labels; generate clarifications via LLM (no hardcoded RU templates)
+- Refuse off-topic chitchat; clarifications via LLM (no hardcoded RU templates)
 DONT:
 - Return ungrounded final answers
 """
@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.adapters.llm.port import LLMClient
+from app.application.dialogue.offtopic import OFF_TOPIC_REFUSAL_RU, is_off_topic
 from app.application.dialogue.specificity import prefer_specific_label
 from app.application.dialogue.state import DialogueState
 from app.application.grounding.service import GroundingService
@@ -53,10 +54,26 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         t0 = time.perf_counter()
         user_message = state.get("user_message", "") or ""
         history = list(state.get("history") or [])
+        if is_off_topic(user_message, history):
+            assess_ms = round((time.perf_counter() - t0) * 1000, 2)
+            logger.info("classify_specificity off_topic message=%r", user_message[:200])
+            return {
+                **state,
+                "specificity": "off_topic",
+                "raw_specificity": "off_topic",
+                "latency_ms": _merge_latency(state, llm_assess_ms=assess_ms),
+                "node_trace": _trace(state, "assess:off_topic"),
+            }
         raw_label = await deps.llm.classify_specificity(user_message, history=history)
+        raw_norm = str(raw_label or "").strip().lower()
         # Conservative: role+topic questions must retrieve/answer (not clarify), even when
         # the LLM timidly returns underspecified/ambiguous.
-        label = prefer_specific_label(raw_label, user_message, history)
+        if raw_norm == "off_topic" and prefer_specific_label(
+            "underspecified", user_message, history
+        ) != "specific":
+            label = "off_topic"
+        else:
+            label = prefer_specific_label(raw_label, user_message, history)
         assess_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(
             "classify_specificity raw=%r final=%r message=%r",
@@ -71,6 +88,15 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             "raw_specificity": str(raw_label),
             "latency_ms": _merge_latency(state, llm_assess_ms=assess_ms),
             "node_trace": _trace(state, trace),
+        }
+
+    async def refuse(state: DialogueState) -> DialogueState:
+        return {
+            **state,
+            "outcome": "refuse",
+            "clarification_text": OFF_TOPIC_REFUSAL_RU,
+            "draft_answer": OFF_TOPIC_REFUSAL_RU,
+            "node_trace": _trace(state, "refuse:off_topic"),
         }
 
     async def clarify(state: DialogueState) -> DialogueState:
@@ -146,16 +172,36 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
 
     async def ground(state: DialogueState) -> DialogueState:
         candidates = list(state.get("candidates") or [])
+        user_message = state.get("user_message") or ""
         draft = None
         complete_ms = 0.0
         if candidates:
+            # Provide several complete-ish chunks; ask for a full-sentence answer.
+            passages = []
+            for idx, c in enumerate(candidates[:3]):
+                loc = c.get("locator") or c.get("section_title") or ""
+                passages.append(
+                    f"[{idx}] ({loc}) {c.get('text')}"
+                )
             t0 = time.perf_counter()
             draft = await deps.llm.complete(
-                system="Ground answers only in provided chunks.",
-                user=f"Q: {state.get('user_message')}\nCHUNK: {candidates[0].get('text')}",
+                system=(
+                    "You are a corporate regulations assistant. "
+                    "Answer ONLY from the provided passages in Russian. "
+                    "Write complete sentences (no mid-thought truncation). "
+                    "If passages do not support an answer, reply with UNSUPPORTED."
+                ),
+                user=(
+                    f"Question: {user_message}\n"
+                    "Passages:\n" + "\n".join(passages)
+                ),
             )
             complete_ms = round((time.perf_counter() - t0) * 1000, 2)
-        result = deps.grounding.ground(candidates=candidates, draft=draft)
+            if draft and "UNSUPPORTED" in draft.upper() and len(draft.strip()) < 40:
+                draft = None
+        result = deps.grounding.ground(
+            candidates=candidates, draft=draft, query=user_message
+        )
         latency = _merge_latency(state, llm_complete_ms=complete_ms) if candidates else dict(
             state.get("latency_ms") or {}
         )
@@ -199,6 +245,7 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
 
     return {
         "assess_specificity": assess_specificity,
+        "refuse": refuse,
         "clarify": clarify,
         "retrieve": retrieve,
         "ground": ground,
@@ -210,6 +257,10 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
 # Module-level placeholders kept for import compatibility / tests.
 async def assess_specificity(state: DialogueState) -> DialogueState:
     raise NotImplementedError("Use make_nodes(deps) — assess_specificity")
+
+
+async def refuse(state: DialogueState) -> DialogueState:
+    raise NotImplementedError("Use make_nodes(deps) — refuse")
 
 
 async def clarify(state: DialogueState) -> DialogueState:

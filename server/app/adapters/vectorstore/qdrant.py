@@ -41,18 +41,47 @@ def _point_id(raw: str | int | None, *, fallback: str) -> str | int:
 
 def sparse_weights_to_vector(weights: dict[str, float] | None) -> dict[str, list]:
     """
-    Map token→weight dict to Qdrant SparseVector indices/values.
+    Map token→weight (or index→weight) dict to Qdrant SparseVector.
 
-    Uses CRC32 for stable uint indices (OpenAI-compatible sparse fallback).
+    - Accepts already-shaped {"indices": [...], "values": [...]}
+    - Dedupes CRC32 collisions by summing weights (Qdrant requires unique indices)
+    - Skips non-finite / non-numeric weights
     """
     if not weights:
         return {"indices": [], "values": []}
-    indices: list[int] = []
-    values: list[float] = []
+    if "indices" in weights and "values" in weights:
+        raw_idx = list(weights.get("indices") or [])  # type: ignore[arg-type]
+        raw_val = list(weights.get("values") or [])  # type: ignore[arg-type]
+        merged: dict[int, float] = {}
+        for idx, val in zip(raw_idx, raw_val, strict=False):
+            try:
+                i = int(idx) & 0x7FFFFFFF
+                v = float(val)
+            except (TypeError, ValueError):
+                continue
+            if v != v:  # NaN
+                continue
+            merged[i] = merged.get(i, 0.0) + v
+        indices = list(merged.keys())
+        values = [merged[i] for i in indices]
+        return {"indices": indices, "values": values}
+
+    merged_tok: dict[int, float] = {}
     for token, weight in weights.items():
-        idx = zlib.crc32(str(token).encode("utf-8")) & 0x7FFFFFFF
-        indices.append(idx)
-        values.append(float(weight))
+        try:
+            v = float(weight)
+        except (TypeError, ValueError):
+            continue
+        if v != v:
+            continue
+        # Numeric string keys from sparse API indices → use directly.
+        try:
+            idx = int(str(token)) & 0x7FFFFFFF
+        except ValueError:
+            idx = zlib.crc32(str(token).encode("utf-8")) & 0x7FFFFFFF
+        merged_tok[idx] = merged_tok.get(idx, 0.0) + v
+    indices = list(merged_tok.keys())
+    values = [merged_tok[i] for i in indices]
     return {"indices": indices, "values": values}
 
 

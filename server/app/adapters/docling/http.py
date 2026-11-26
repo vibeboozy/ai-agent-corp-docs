@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -31,6 +32,95 @@ def _approx_tokens(text: str) -> list[str]:
     return [t for t in (text or "").split() if t]
 
 
+# Prefer section / numbered-clause boundaries over blind token windows.
+_SECTION_SPLIT_RE = re.compile(
+    r"(?m)(?="
+    r"^#{1,6}\s+"
+    r"|^\*\*\d+(?:\.\d+)*\.?\*\*"
+    r"|^\d+(?:\.\d+)*\.\s+"
+    r"|<!--\s*page-break\s*-->"
+    r")"
+)
+_SECTION_TITLE_RE = re.compile(
+    r"(?m)^(?:#{1,6}\s+|\*\*)?(\d+(?:\.\d+)*\.?\s+[^\n*]{1,120}|\d+(?:\.\d+)*\.)"
+)
+
+
+def split_sections(body: str) -> list[tuple[str | None, str]]:
+    """
+    Split markdown/regulation text into (section_title, body) pairs.
+
+    Keeps numbered clauses (7.2., **17.3.**) and headings intact so hybrid
+    windows do not start mid-sentence mid-clause.
+    """
+    text = (body or "").strip()
+    if not text:
+        return []
+    parts = _SECTION_SPLIT_RE.split(text)
+    out: list[tuple[str | None, str]] = []
+    for part in parts:
+        part = part.strip()
+        if not part or part.startswith("<!--"):
+            continue
+        title = None
+        m = _SECTION_TITLE_RE.search(part[:160])
+        if m:
+            title = m.group(1).strip().rstrip("*").strip()
+        out.append((title, part))
+    return out or [(None, text)]
+
+
+def _window_tokens(
+    tokens: list[str],
+    *,
+    max_tokens: int,
+    overlap_tokens: int,
+    min_tokens: int,
+    section_title: str | None,
+) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    if not tokens:
+        return chunks
+    if len(tokens) <= max_tokens:
+        text = " ".join(tokens)
+        chunks.append(
+            {
+                "chunk_id": f"docling-{uuid4().hex[:8]}",
+                "text": text,
+                "token_count": len(tokens),
+                "section_title": section_title,
+                "locator": section_title,
+            }
+        )
+        return chunks
+    step = max(1, max_tokens - overlap_tokens)
+    start = 0
+    while start < len(tokens):
+        window = tokens[start : start + max_tokens]
+        # Prefer ending on a sentence-ish token when possible.
+        if len(window) == max_tokens:
+            for back in range(len(window) - 1, max(min_tokens, len(window) // 2), -1):
+                if window[back].endswith((".", "!", "?", "…", "»")):
+                    window = window[: back + 1]
+                    break
+        if len(window) < min_tokens and chunks:
+            break
+        text = " ".join(window)
+        chunks.append(
+            {
+                "chunk_id": f"docling-{uuid4().hex[:8]}",
+                "text": text,
+                "token_count": len(window),
+                "section_title": section_title,
+                "locator": section_title,
+            }
+        )
+        if start + len(window) >= len(tokens):
+            break
+        start += max(1, len(window) - overlap_tokens) if len(window) < max_tokens else step
+    return chunks
+
+
 def hybrid_chunk_text(
     body: str,
     *,
@@ -42,50 +132,35 @@ def hybrid_chunk_text(
     min_tokens: int = 32,
 ) -> dict[str, Any]:
     """
-    Split converted document text into overlapping windows.
+    Section-aware HybridChunker-style windows from DOCLING_CHUNK_* env.
 
-    Mimics HybridChunker sizing from DOCLING_CHUNK_* env without shipping the
-    full Docling ML stack in-process.
+    Splits on regulation headings / numbered clauses first, then applies
+    overlapping token windows inside each section (sentence-end bias).
     """
     max_tokens = max(1, int(max_tokens))
     overlap_tokens = max(0, min(int(overlap_tokens), max_tokens - 1))
     min_tokens = max(1, int(min_tokens))
-    tokens = _approx_tokens(body)
     chunks: list[dict[str, Any]] = []
-    if not tokens:
-        return {
-            "source_path": source_path,
-            "chunks": [],
-            "text": body,
-            "chunker": chunker,
-            "tokenizer": tokenizer,
-        }
-
-    if len(tokens) <= max_tokens:
-        chunks.append(
-            {
-                "chunk_id": f"docling-{uuid4().hex[:8]}",
-                "text": " ".join(tokens),
-                "token_count": len(tokens),
-            }
-        )
-    else:
-        step = max(1, max_tokens - overlap_tokens)
-        start = 0
-        while start < len(tokens):
-            window = tokens[start : start + max_tokens]
-            if len(window) < min_tokens and chunks:
-                break
-            chunks.append(
-                {
-                    "chunk_id": f"docling-{uuid4().hex[:8]}",
-                    "text": " ".join(window),
-                    "token_count": len(window),
-                }
+    for section_title, section_body in split_sections(body):
+        tokens = _approx_tokens(section_body)
+        if not tokens:
+            continue
+        # Tiny orphan fragments attach to previous chunk when possible.
+        if len(tokens) < min_tokens and chunks and section_title is None:
+            prev = chunks[-1]
+            merged = f"{prev['text']} {' '.join(tokens)}".strip()
+            prev["text"] = merged
+            prev["token_count"] = len(_approx_tokens(merged))
+            continue
+        chunks.extend(
+            _window_tokens(
+                tokens,
+                max_tokens=max_tokens,
+                overlap_tokens=overlap_tokens,
+                min_tokens=min_tokens,
+                section_title=section_title,
             )
-            if start + max_tokens >= len(tokens):
-                break
-            start += step
+        )
 
     return {
         "source_path": source_path,

@@ -76,7 +76,16 @@ rag-server ingest-docx /path/to/reg.docx --title "Procurement"
 # or: python3 -m app.cli ingest-docx /path/to/reg.docx
 ```
 
-### 5. Tests
+### 5. Abbreviation glossary
+
+Built-in corporate abbreviations (РП, АМ, ТЗ, …) expand queries before hybrid
+search and, on ingest, append expansions into chunk **text** (e.g.
+`РП (Руководитель проекта)`) before dense/sparse embed, plus optional
+`metadata.abbreviations`. Configure via `ABBREVIATION_*` in `.env.example`
+(`ABBREVIATION_GLOSSARY`, `ABBREVIATION_GLOSSARY_PATH`,
+`ABBREVIATION_EXPAND_QUERY`, `ABBREVIATION_ENRICH_INGEST`).
+
+### 6. Tests
 
 ```bash
 pytest
@@ -84,9 +93,9 @@ pytest
 
 Default CI runs unit/contract tests (mocked HTTP where needed). Integration/e2e
 tests run when dependencies answer ping via normal `.env` / Settings config;
-they **skip** when infra is unreachable — no `RUN_LIVE_*` env flags.
+they **skip** when infra is unreachable.
 
-### 6. Optional live suites
+### 7. Optional live suites
 
 ```bash
 pytest -m integration   # per-service smoke when reachable
@@ -94,7 +103,7 @@ pytest -m e2e            # full appeal path when core stack is up
 rag-server check
 ```
 
-### 7. Alembic (Postgres)
+### 8. Alembic (Postgres)
 
 ```bash
 # DATABASE_URL=postgresql+asyncpg://...

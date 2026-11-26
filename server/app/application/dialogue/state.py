@@ -21,7 +21,7 @@ class DialogueState(TypedDict, total=False):
     history: list[str]
     clarify_turns: int
     max_clarify_turns: int
-    specificity: str  # underspecified | ambiguous | specific
+    specificity: str  # underspecified | ambiguous | specific | off_topic
     raw_specificity: str  # classifier label before prefer_specific_label
     candidates: list[dict[str, Any]]
     grounded: bool
@@ -30,7 +30,7 @@ class DialogueState(TypedDict, total=False):
     clarification_text: str
     clarify_reason: str  # underspecified | ambiguous | max_clarify_exceeded
     escalation_reason: str
-    outcome: str  # clarify | answer | escalate
+    outcome: str  # clarify | answer | escalate | refuse
     node_trace: list[str]
     quality_email: str
     # Observability for audit_events.payload

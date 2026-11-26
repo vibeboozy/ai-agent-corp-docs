@@ -24,6 +24,7 @@ from app.application.learning.service import LearningService
 from app.application.quality_escalation.service import QualityEscalationService
 from app.application.retrieval.service import RetrievalService
 from app.config.settings import Settings, get_settings
+from app.domain.glossary import AbbreviationGlossary, build_glossary
 
 
 @dataclass
@@ -38,6 +39,7 @@ class Container:
     libreoffice: Any
     escalation: Any
     persistence: Any
+    glossary: AbbreviationGlossary
     appeals: AppealsService
     dialogue: DialogueService
     learning: LearningService
@@ -151,6 +153,16 @@ def build_container(settings: Settings | None = None) -> Container:
     escalation = _build_escalation(settings)
     persistence = _build_persistence(settings)
 
+    # Drop cached glossary when Settings change (clear_settings_cache → reset_container).
+    build_glossary.cache_clear()
+    glossary = build_glossary(
+        glossary_text=settings.abbreviation_glossary or "",
+        glossary_path=settings.abbreviation_glossary_path or "",
+        expand_query=settings.abbreviation_expand_query,
+        enrich_ingest=settings.abbreviation_enrich_ingest,
+        use_defaults=settings.abbreviation_use_defaults,
+    )
+
     retrieval = RetrievalService(
         embeddings=embeddings,
         vectorstore=vectorstore,
@@ -163,6 +175,8 @@ def build_container(settings: Settings | None = None) -> Container:
         rerank_min_score=settings.rerank_min_score,
         llm=llm,
         rerank_llm_model=settings.rerank_llm_model,
+        glossary=glossary,
+        lexical_weight=settings.retrieval_lexical_weight,
     )
     grounding = GroundingService(
         min_citations=settings.grounding_min_citations,
@@ -191,6 +205,7 @@ def build_container(settings: Settings | None = None) -> Container:
         embeddings=embeddings,
         vectorstore=vectorstore,
         persistence=persistence,
+        glossary=glossary,
     )
     learning = LearningService(persistence=persistence, ingest=ingest)
     appeals = AppealsService(persistence=persistence, dialogue=dialogue)
@@ -214,6 +229,7 @@ def build_container(settings: Settings | None = None) -> Container:
         libreoffice=libreoffice,
         escalation=escalation,
         persistence=persistence,
+        glossary=glossary,
         appeals=appeals,
         dialogue=dialogue,
         learning=learning,

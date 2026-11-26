@@ -45,6 +45,14 @@ def test_sparse_weights_to_vector_stable() -> None:
     assert len(a["indices"]) == 2
 
 
+def test_sparse_weights_dedupes_and_accepts_indices_shape() -> None:
+    shaped = sparse_weights_to_vector({"indices": [5, 5, 9], "values": [1.0, 2.0, 3.0]})
+    assert shaped["indices"].count(5) == 1
+    assert shaped["values"][shaped["indices"].index(5)] == 3.0
+    empty = sparse_weights_to_vector(None)
+    assert empty == {"indices": [], "values": []}
+
+
 class _FakeCollections:
     def __init__(self, names: list[str]) -> None:
         self.collections = [SimpleNamespace(name=n) for n in names]

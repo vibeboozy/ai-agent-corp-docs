@@ -18,6 +18,12 @@ from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
 
 
+def test_route_after_assess_refuse_vs_retrieve() -> None:
+    assert graph_mod._route_after_assess({"specificity": "off_topic"}) == "refuse"
+    assert graph_mod._route_after_assess({"specificity": "specific"}) == "retrieve"
+    assert graph_mod._route_after_assess({}) == "retrieve"
+
+
 def test_route_after_retrieve_clarify_vs_ground() -> None:
     assert (
         graph_mod._route_after_retrieve({"specificity": "underspecified", "user_message": "?"})
@@ -86,6 +92,7 @@ def test_compiled_graph_exposes_expected_nodes() -> None:
     names = set(getattr(compiled, "nodes", {}).keys())
     expected = {
         "assess_specificity",
+        "refuse",
         "clarify",
         "retrieve",
         "ground",
