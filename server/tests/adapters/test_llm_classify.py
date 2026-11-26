@@ -105,3 +105,47 @@ async def test_classify_via_httpx_mock_transport_strips_think(
     assert label == "specific"
     assert captured["url"].endswith("/chat/completions")
     assert "Classifier" in captured["raw"] or "Question" in captured["raw"]
+
+
+@pytest.mark.asyncio
+async def test_complete_strips_think_before_return(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live generate path: complete() must strip CoT on the first response."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _ = request
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": (
+                                "<think>\nWho plans risks — look at the regulation.\n"
+                                "</think>\n"
+                                "За планирование рисков отвечает РП."
+                            )
+                        }
+                    }
+                ]
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_client = httpx.AsyncClient
+
+    def _client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return real_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", _client)
+
+    client = HttpLLMClient(
+        base_url="https://llm.test.invalid/v1",
+        api_key=None,
+        model="test-model",
+    )
+    text = await client.complete(system="Answer", user="Кто планирует риски?")
+    assert text == "За планирование рисков отвечает РП."
+    assert "<think>" not in text.lower()

@@ -1,15 +1,17 @@
 """
 ANCHOR: app.adapters.llm.HttpLLMClient
 PURPOSE: Real HttpLLMClient — OpenAI-compatible chat completions behind flags.
-Dependencies: httpx; Settings
+Dependencies: httpx; Settings; text_util.strip_think_blocks
 CRITICAL: Always used — real OpenAI-compatible chat client.
 DO:
 - Enforce *_TIMEOUT_S on clients
 - Map failures to typed errors without leaking secrets
+- Strip <think>…</think> from complete() before any caller sees the text
 - Strip <think>…</think> before classify_specificity label matching
 DONT:
 - Call from application without DI factory
 - Match specificity labels inside model reasoning / chain-of-thought
+- Return raw CoT wrappers to dialogue / grounding / API layers
 """
 
 from __future__ import annotations
@@ -21,22 +23,15 @@ from urllib.parse import urlparse
 import httpx
 
 from app.adapters.llm.port import LLMClient
+from app.application.text_util import strip_think_blocks
 from app.domain.errors import AppError, UpstreamTimeoutError
 
-# Common CoT wrappers; also drop unclosed <think>… tails.
-_THINK_RE = re.compile(
-    r"<think>.*?</think>|<thinking>.*?</thinking>|"
-    r"<think>.*$|<thinking>.*$",
-    re.IGNORECASE | re.DOTALL,
-)
+# Re-export for existing imports (tests / callers).
+__all__ = ("HttpLLMClient", "parse_specificity_label", "strip_think_blocks")
+
 _LABELS = ("underspecified", "ambiguous", "specific", "off_topic")
 # When several labels appear in leftover prose, prefer answering over clarifying.
 _LABEL_PREFERENCE = ("specific", "ambiguous", "underspecified", "off_topic")
-
-
-def strip_think_blocks(text: str) -> str:
-    """Remove model chain-of-thought wrappers before downstream classification."""
-    return _THINK_RE.sub("", text or "").strip()
 
 
 def parse_specificity_label(raw: str) -> str:
@@ -147,7 +142,9 @@ class HttpLLMClient:
                 )
                 resp.raise_for_status()
                 data = resp.json()
-                return str(data["choices"][0]["message"]["content"])
+                # Models often dump CoT into content when a separate reasoning
+                # channel is unavailable — strip before any caller persists/returns.
+                return strip_think_blocks(str(data["choices"][0]["message"]["content"]))
         except httpx.TimeoutException as exc:
             raise UpstreamTimeoutError("LLM request timed out") from exc
         except httpx.HTTPError as exc:

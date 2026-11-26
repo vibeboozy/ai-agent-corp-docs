@@ -24,7 +24,7 @@ from app.application.dialogue.graph import build_dialogue_graph
 from app.application.dialogue.nodes import DialogueDeps
 from app.application.dialogue.state import DialogueState
 from app.application.quality_escalation.service import QualityEscalationService
-from app.application.text_util import truncate_at_sentence
+from app.application.text_util import strip_think_blocks, truncate_at_sentence
 from app.domain.enums import AppealStatus, MessageKind, MessageRole
 from app.domain.errors import ConflictError, NotFoundError
 from app.domain.models import Appeal, Message
@@ -99,10 +99,12 @@ class DialogueService:
         new_messages: list[Message] = [user_msg]
 
         if outcome == "refuse":
-            refusal = str(
-                final.get("draft_answer")
-                or final.get("clarification_text")
-                or "Этот вопрос не поддерживается."
+            refusal = strip_think_blocks(
+                str(
+                    final.get("draft_answer")
+                    or final.get("clarification_text")
+                    or "Этот вопрос не поддерживается."
+                )
             )
             assistant = await self._persistence.add_message(
                 appeal_id=appeal_id,
@@ -117,18 +119,22 @@ class DialogueService:
             )
             new_messages.append(assistant)
         elif outcome == "clarify":
+            clarify_text = strip_think_blocks(
+                str(final.get("clarification_text") or "Уточните вопрос, пожалуйста.")
+            )
             assistant = await self._persistence.add_message(
                 appeal_id=appeal_id,
                 role=MessageRole.ASSISTANT,
                 message_kind=MessageKind.CLARIFICATION,
-                content=str(final.get("clarification_text") or "Уточните вопрос, пожалуйста."),
+                content=clarify_text,
             )
             appeal = await self._persistence.update_appeal(
                 appeal_id, status=AppealStatus.CLARIFYING
             )
             new_messages.append(assistant)
         elif outcome == "answer":
-            answer_text = str(final.get("draft_answer") or "")
+            # First-generate path: never persist CoT that leaked into draft_answer.
+            answer_text = strip_think_blocks(str(final.get("draft_answer") or ""))
             assistant = await self._persistence.add_message(
                 appeal_id=appeal_id,
                 role=MessageRole.ASSISTANT,
