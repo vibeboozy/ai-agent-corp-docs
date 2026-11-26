@@ -46,11 +46,14 @@ class IngestService:
         doc_id = document_id or f"learned-{job_id[:8]}"
         converted = await self._docling.convert(text=text)
         raw_chunks = converted.get("chunks") or [{"chunk_id": f"c-{job_id[:8]}", "text": text}]
-        vectors = await self._embeddings.embed_dense([c["text"] for c in raw_chunks])
+        texts = [c["text"] for c in raw_chunks]
+        vectors = await self._embeddings.embed_dense(texts)
+        sparse_maps = await self._embeddings.embed_sparse(texts)
         upserts = []
         for idx, chunk in enumerate(raw_chunks):
             chunk_id = chunk.get("chunk_id") or f"c-{uuid4().hex[:8]}"
             dense = vectors[idx] if idx < len(vectors) else None
+            sparse = sparse_maps[idx] if idx < len(sparse_maps) else None
             upserts.append(
                 {
                     "document_id": doc_id,
@@ -60,6 +63,7 @@ class IngestService:
                     "keywords": keywords or [],
                     "source": "learned",
                     "dense_vector": dense,
+                    "sparse_vector": sparse,
                     "metadata": {
                         **(metadata or {}),
                         "ingest_job_id": job_id,

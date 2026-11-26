@@ -49,7 +49,7 @@
 | Doc convert | Docling (HTTP) + LibreOffice/`soffice` for docx when needed | Live HTTP / soffice |
 | Persistence | **PostgreSQL** via SQLAlchemy 2.x async + asyncpg | Appeals, messages, escalations, audit, stats; must survive restarts. Optional SQLite only as emergency local fallback |
 | Logging | structlog or stdlib `logging` + JSON formatter | Correlation IDs |
-| Tests | pytest + pytest-asyncio + httpx ASGITransport | Unit/mocked HTTP in CI; live gated by `RUN_LIVE_*` |
+| Tests | pytest + pytest-asyncio + httpx ASGITransport | Unit/mocked HTTP in CI; live when services reachable via Settings |
 | Packaging | `pyproject.toml`, ruff, mypy (strict-ish) | See `rules/coding_standards.xml` |
 
 ### 2.1 LangGraph / LangChain decision
@@ -128,7 +128,7 @@ API (FastAPI routers)
 - Each port has a Protocol/ABC and one production implementation: `HttpX` / `QdrantX` / `SqlAlchemyPersistence` / `SofficeLibreOffice` / `EmailEscalationNotifier`.
 - Factory in `config` / DI always constructs real adapters from Settings (URLs, keys, timeouts).
 - LangGraph nodes receive ports via DI — topology is independent of concrete clients.
-- Unit tests mock ports or HTTP at the adapter boundary; product flows need live services (`RUN_LIVE_*`).
+- Unit tests mock ports or HTTP at the adapter boundary; product flows need live services (configured in `.env`).
 
 ### 3.2 Module map (see also `semantic_graph.xml`)
 
@@ -157,7 +157,7 @@ API (FastAPI routers)
 | Migrations | Alembic |
 | Port | `AppealRepository` / `Persistence` Protocol |
 | Real adapter | `SqlAlchemyPersistence` (or split repos under `adapters/persistence/`) |
-| CI unit tests | Mocked ports; Postgres via `RUN_LIVE_POSTGRES=1` |
+| CI unit tests | Mocked ports; Postgres integration when DATABASE_URL answers ping |
 | Fallback | `sqlite+aiosqlite` only if explicitly allowed for laptop smoke; production/prototype target remains Postgres |
 
 **Env:** `DATABASE_URL`, pool knobs (`DATABASE_POOL_SIZE`, `DATABASE_MAX_OVERFLOW`, `DATABASE_POOL_TIMEOUT_S`), optional `DATABASE_ECHO`. See `.env.example`.
@@ -246,13 +246,12 @@ $DOCS_CORPUS_PATH/*.docx   # local corpus; gitignored
 ```text
 user message on appeal
   → dialogue graph:
-       assess_specificity
-         → clarify (loop, max DIALOGUE_MAX_CLARIFY_TURNS)
-         → retrieve (hybrid RRF; prefer latest)
+       assess_specificity (prefer_specific_label; log raw classify)
+         → retrieve (hybrid dense+sparse RRF; prefer latest)  # always before clarify
          → optional rerank
-         → ground
-              → answer + citations
+         → ground (specific / role+topic) → answer + citations
               → escalate (quality ticket + user notice; no invention)
+         → clarify (LLM-generated; loop, max DIALOGUE_MAX_CLARIFY_TURNS)
 ```
 
 ### 6.3 Learn
@@ -292,7 +291,7 @@ Documented in `.env.example` (this directory). Groups:
 - **Rerank / Retrieval** — `RERANK_MODE=none|llm`, candidates, top_k, max_per_doc, min_score; prefetch, prefer latest
 - **Quality** — `QUALITY_SERVICE_EMAIL`, escalation toggles
 - **Cache / Log** — operational knobs
-- **Live tests** — `RUN_LIVE_TESTS`, `RUN_LIVE_LLM`, `RUN_LIVE_EMBEDDINGS`, `RUN_LIVE_QDRANT`, `RUN_LIVE_DOCLING`, `RUN_LIVE_POSTGRES`, `RUN_LIVE_E2E`
+- **Tests** — no `RUN_LIVE_*`; integration/e2e skip unless services answer ping
 
 **CRITICAL:** Runtime always uses real providers. Configure URLs/keys in `.env`. Unit tests may mock HTTP; product demos need live infra (`rag-server check`).
 
@@ -302,14 +301,14 @@ Documented in `.env.example` (this directory). Groups:
 
 Details: `rules/testing_rules.xml`.
 
-| Mode | Flags | What runs |
-|------|-------|-----------|
-| Default CI / local | `RUN_LIVE_*=0` | Unit/contract (mocked HTTP); live suites skip |
-| Per-adapter smoke | `RUN_LIVE_<SVC>=1` | Connectivity + one round-trip to that service |
-| Integration | `RUN_LIVE_TESTS=1` | Broader adapter + retrieval checks against real backends |
-| E2E scenarios | `RUN_LIVE_E2E=1` (+ real keys) | Full appeal flows: grounded answer, clarify dialogue, escalation, officer-reply learning |
+| Mode | Gate | What runs |
+|------|------|-----------|
+| Default CI / local | (none) | Unit/contract (mocked HTTP) |
+| Per-adapter smoke | service ping via Settings | Connectivity + one round-trip |
+| Integration | `-m integration` + reachable deps | Broader adapter + retrieval checks |
+| E2E scenarios | `-m e2e` + core stack up | Full appeal flows: grounded answer, clarify, escalate, learn |
 
-Live suites must **skip** when flags/secrets are absent — never fail CI for missing infra. Assert structure, citations, statuses, and policy outcomes — not exact live LLM wording.
+Live suites must **skip** when infra is unreachable — never fail CI for missing services. Assert structure, citations, statuses, and policy outcomes — not exact live LLM wording.
 
 ---
 
@@ -317,7 +316,7 @@ Live suites must **skip** when flags/secrets are absent — never fail CI for mi
 
 1. Follow `rules/anchor_standards.xml` for every assistant answer.
 2. Follow `rules/coding_standards.xml` for layout, adapter naming, and LangGraph placement.
-3. Follow `rules/testing_rules.xml` — CI must not call live providers unless `RUN_LIVE_*` is set.
+3. Follow `rules/testing_rules.xml` — CI unit tests must not call live providers; integration/e2e skip when unreachable.
 4. Follow `rules/security_rules.xml` for secrets and SSRF.
 5. Prefer extending adapters over scattering HTTP calls in services or LangGraph nodes.
 6. Russian business copy in user-facing messages is OK; code identifiers stay English.

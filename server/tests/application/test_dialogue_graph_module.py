@@ -23,6 +23,7 @@ def test_placeholder_graph_descriptor() -> None:
 def test_langgraph_compiles_with_mocked_ports() -> None:
     embeddings = MagicMock()
     embeddings.embed_dense = AsyncMock(return_value=[[0.1, 0.2]])
+    embeddings.embed_sparse = AsyncMock(return_value=[{"x": 1.0}])
     vectorstore = MagicMock()
     vectorstore.search = AsyncMock(return_value=[])
     llm = MagicMock()

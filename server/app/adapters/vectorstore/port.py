@@ -21,10 +21,11 @@ class VectorStore(Protocol):
         *,
         limit: int = 5,
         dense_vector: list[float] | None = None,
+        sparse_vector: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
         """Return candidate chunks: document_id, chunk_id, text, score, …"""
         ...
 
     async def upsert(self, chunks: list[dict[str, Any]]) -> None:
-        """Upsert chunks into the active collection."""
+        """Upsert chunks into the active collection (named dense + sparse)."""
         ...

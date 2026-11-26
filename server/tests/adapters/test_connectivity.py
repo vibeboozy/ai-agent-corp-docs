@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.adapters.test_connectivity
-PURPOSE: Connectivity report shape (mocked) + live probes gated by RUN_LIVE_*.
+PURPOSE: Connectivity report shape (mocked) + live probes when services up.
 Dependencies: connectivity service, adapters
 """
 
@@ -11,7 +11,7 @@ import pytest
 from app.application.connectivity.service import ConnectivityService
 from app.config.factories import build_container
 from app.config.settings import Settings, clear_settings_cache
-from tests.conftest import env_flag
+from tests.conftest import require_services
 
 
 @pytest.mark.asyncio
@@ -65,45 +65,45 @@ async def test_connectivity_degraded_on_ping_failure() -> None:
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not env_flag("RUN_LIVE_LLM"), reason="RUN_LIVE_LLM not set")
 @pytest.mark.asyncio
 async def test_live_llm_ping() -> None:
+    require_services("llm")
     clear_settings_cache()
     c = build_container(Settings())
     assert await c.llm.ping() is True
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not env_flag("RUN_LIVE_EMBEDDINGS"), reason="RUN_LIVE_EMBEDDINGS not set")
 @pytest.mark.asyncio
 async def test_live_embeddings_ping() -> None:
+    require_services("embeddings")
     clear_settings_cache()
     c = build_container(Settings())
     assert await c.embeddings.ping() is True
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not env_flag("RUN_LIVE_QDRANT"), reason="RUN_LIVE_QDRANT not set")
 @pytest.mark.asyncio
 async def test_live_qdrant_ping() -> None:
+    require_services("qdrant")
     clear_settings_cache()
     c = build_container(Settings())
     assert await c.vectorstore.ping() is True
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not env_flag("RUN_LIVE_DOCLING"), reason="RUN_LIVE_DOCLING not set")
 @pytest.mark.asyncio
 async def test_live_docling_ping() -> None:
+    require_services("docling")
     clear_settings_cache()
     c = build_container(Settings())
     assert await c.docling.ping() is True
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not env_flag("RUN_LIVE_POSTGRES"), reason="RUN_LIVE_POSTGRES not set")
 @pytest.mark.asyncio
 async def test_live_postgres_ping_via_connectivity() -> None:
+    require_services("postgres")
     clear_settings_cache()
     c = build_container(Settings())
     assert await c.persistence.ping() is True

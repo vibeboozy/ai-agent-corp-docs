@@ -5,6 +5,7 @@ Dependencies: langgraph; dialogue.nodes; ports via DI
 CRITICAL: Topology is source of truth for clarify/retrieve/ground/answer/escalate (ANC-LG-01).
 DO:
 - Compile graph with DI-injected node wiring
+- Retrieve before clarify so timid classify cannot skip KB hits
 - Keep topology independent of concrete adapters
 DONT:
 - Add LangChain RetrievalQA path that skips grounding (ANC-LG-02)
@@ -17,24 +18,28 @@ from typing import Any, Literal
 from langgraph.graph import END, START, StateGraph
 
 from app.application.dialogue.nodes import DialogueDeps, make_nodes
+from app.application.dialogue.specificity import looks_role_topic_specific
 from app.application.dialogue.state import DialogueState
 
 
-def _route_after_assess(
+def _route_after_retrieve(
     state: DialogueState,
-) -> Literal["clarify", "retrieve"]:
+) -> Literal["clarify", "ground"]:
     """
-    specific → retrieve (then ground/answer or escalate).
-    underspecified|ambiguous → clarify (no retrieval yet).
+    Retrieve always runs after assess. Then:
 
-    Assess applies prefer_specific_label so role+topic questions reach retrieve
-    even when the raw LLM label was timid. Empty retrieval / RERANK_MIN_SCORE
-    wiping hits escalates in ground — it must not loop clarify.
+    - specific (incl. prefer_specific_label override) OR role+topic heuristic → ground
+    - underspecified|ambiguous without role+topic → clarify
+    - specific + empty hits escalates inside ground (never clarify-loop)
     """
     specificity = state.get("specificity") or "underspecified"
+    msg = state.get("user_message") or ""
+    history = list(state.get("history") or [])
+    if specificity == "specific" or looks_role_topic_specific(msg, history):
+        return "ground"
     if specificity in ("underspecified", "ambiguous"):
         return "clarify"
-    return "retrieve"
+    return "ground"
 
 
 def _route_after_clarify(
@@ -64,18 +69,19 @@ def build_dialogue_graph(deps: DialogueDeps) -> Any:
     graph.add_node("answer", nodes["answer"])
     graph.add_node("escalate", nodes["escalate"])
 
+    # Retrieve-before-clarify: timid classify can no longer skip KB.
     graph.add_edge(START, "assess_specificity")
+    graph.add_edge("assess_specificity", "retrieve")
     graph.add_conditional_edges(
-        "assess_specificity",
-        _route_after_assess,
-        {"clarify": "clarify", "retrieve": "retrieve"},
+        "retrieve",
+        _route_after_retrieve,
+        {"clarify": "clarify", "ground": "ground"},
     )
     graph.add_conditional_edges(
         "clarify",
         _route_after_clarify,
         {"escalate": "escalate", "__end__": END},
     )
-    graph.add_edge("retrieve", "ground")
     graph.add_conditional_edges(
         "ground",
         _route_after_ground,

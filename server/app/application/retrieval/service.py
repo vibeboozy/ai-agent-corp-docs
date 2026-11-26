@@ -134,12 +134,17 @@ class RetrievalService:
 
         t0 = time.perf_counter()
         vectors = await self._embeddings.embed_dense([query])
+        sparse_maps = await self._embeddings.embed_sparse([query])
         embed_ms = round((time.perf_counter() - t0) * 1000, 2)
         dense = vectors[0] if vectors else None
+        sparse = sparse_maps[0] if sparse_maps else None
 
         t1 = time.perf_counter()
         hits = await self._vectorstore.search(
-            query, limit=min(fetch_n, max(fetch_n, final_k)), dense_vector=dense
+            query,
+            limit=min(fetch_n, max(fetch_n, final_k)),
+            dense_vector=dense,
+            sparse_vector=sparse,
         )
         search_ms = round((time.perf_counter() - t1) * 1000, 2)
         hits = self._prefer_sort(list(hits or []))

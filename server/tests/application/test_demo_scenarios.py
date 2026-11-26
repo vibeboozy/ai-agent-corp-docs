@@ -21,7 +21,13 @@ class _FakeLLM:
     def __init__(self, *, label: str, draft: str = "draft") -> None:
         self._label = label
         self._draft = draft
-        self.complete = AsyncMock(return_value=draft)
+        self.complete = AsyncMock(side_effect=self._complete)
+
+    async def _complete(self, *, system: str, user: str, temperature: float | None = None) -> str:
+        _ = (system, temperature)
+        if "Reason:" in user:
+            return "Уточните, пожалуйста, тему и что именно нужно узнать."
+        return self._draft
 
     async def classify_specificity(
         self, user_message: str, history: list[str] | None = None
@@ -34,15 +40,23 @@ class _FakeEmbeddings:
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         return [[0.1, 0.2, 0.3] for _ in texts]
 
+    async def embed_sparse(self, texts: list[str]) -> list[dict[str, float]]:
+        return [{"токен": 1.0} for _ in texts]
+
 
 class _FakeVectorStore:
     def __init__(self, hits: list[dict[str, Any]]) -> None:
         self._hits = hits
 
     async def search(
-        self, query: str, *, limit: int = 5, dense_vector: list[float] | None = None
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        dense_vector: list[float] | None = None,
+        sparse_vector: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
-        _ = (query, limit, dense_vector)
+        _ = (query, limit, dense_vector, sparse_vector)
         return list(self._hits)
 
 
@@ -94,7 +108,7 @@ class TestDemoExactFlow:
         assert out["grounded"] is True
         assert out["citations"]
         assert out["citations"][0]["chunk_id"] == "chunk-otchetnost"
-        assert "assess:specific" in out["node_trace"]
+        assert any("assess:specific" in t for t in out["node_trace"])
         assert "retrieve:hits=1" in out["node_trace"]
         assert "ground:ok" in out["node_trace"]
 

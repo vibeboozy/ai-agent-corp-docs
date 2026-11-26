@@ -68,6 +68,7 @@ async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
     title = document_title or src.stem
     texts = [c["text"] for c in chunks]
     vectors = await container.embeddings.embed_dense(texts)
+    sparse_maps = await container.embeddings.embed_sparse(texts)
     upserts = []
     for idx, chunk in enumerate(chunks):
         upserts.append(
@@ -78,6 +79,7 @@ async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
                 "document_title": title,
                 "source": "ingest",
                 "dense_vector": vectors[idx] if idx < len(vectors) else None,
+                "sparse_vector": sparse_maps[idx] if idx < len(sparse_maps) else None,
                 "metadata": {"source_path": str(src)},
             }
         )

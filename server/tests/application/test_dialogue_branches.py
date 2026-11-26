@@ -21,7 +21,23 @@ class _FakeLLM:
     def __init__(self, *, label: str, draft: str = "draft") -> None:
         self._label = label
         self._draft = draft
-        self.complete = AsyncMock(return_value=draft)
+        self.complete = AsyncMock(
+            side_effect=self._complete,
+        )
+
+    async def _complete(self, *, system: str, user: str, temperature: float | None = None) -> str:
+        _ = temperature
+        if "clarifying" in system.lower() or "Reason:" in user:
+            if "ambiguous" in user.lower():
+                return (
+                    "Уточните, пожалуйста: речь о договорах на закупку или о договорах "
+                    "с подрядчиками?"
+                )
+            return (
+                "Вопрос сформулирован недостаточно конкретно. Укажите, пожалуйста, "
+                "тип процесса и что именно нужно узнать."
+            )
+        return self._draft
 
     async def classify_specificity(
         self, user_message: str, history: list[str] | None = None
@@ -34,15 +50,23 @@ class _FakeEmbeddings:
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         return [[0.1, 0.2, 0.3] for _ in texts]
 
+    async def embed_sparse(self, texts: list[str]) -> list[dict[str, float]]:
+        return [{t: 1.0 for t in (text.lower().split()[:3] or ["x"])} for text in texts]
+
 
 class _FakeVectorStore:
     def __init__(self, hits: list[dict[str, Any]]) -> None:
         self._hits = hits
 
     async def search(
-        self, query: str, *, limit: int = 5, dense_vector: list[float] | None = None
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        dense_vector: list[float] | None = None,
+        sparse_vector: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
-        _ = (query, limit, dense_vector)
+        _ = (query, limit, dense_vector, sparse_vector)
         return list(self._hits)
 
 
@@ -71,7 +95,8 @@ async def test_graph_underspecified_clarifies() -> None:
     )
     assert out["outcome"] == "clarify"
     assert out["clarification_text"]
-    assert "assess:underspecified" in out["node_trace"]
+    assert any("assess:underspecified" in t for t in out["node_trace"])
+    assert any(t.startswith("retrieve:") for t in out["node_trace"])
     assert any(t.startswith("clarify") for t in out["node_trace"])
     assert out.get("clarify_reason") == "underspecified"
 

@@ -22,6 +22,7 @@ class DialogueState(TypedDict, total=False):
     clarify_turns: int
     max_clarify_turns: int
     specificity: str  # underspecified | ambiguous | specific
+    raw_specificity: str  # classifier label before prefer_specific_label
     candidates: list[dict[str, Any]]
     grounded: bool
     draft_answer: str

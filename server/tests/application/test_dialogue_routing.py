@@ -18,11 +18,37 @@ from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
 
 
-def test_route_after_assess_clarify_vs_retrieve() -> None:
-    assert graph_mod._route_after_assess({"specificity": "underspecified"}) == "clarify"
-    assert graph_mod._route_after_assess({"specificity": "ambiguous"}) == "clarify"
-    assert graph_mod._route_after_assess({"specificity": "specific"}) == "retrieve"
-    assert graph_mod._route_after_assess({}) == "clarify"  # default underspecified
+def test_route_after_retrieve_clarify_vs_ground() -> None:
+    assert (
+        graph_mod._route_after_retrieve({"specificity": "underspecified", "user_message": "?"})
+        == "clarify"
+    )
+    assert (
+        graph_mod._route_after_retrieve(
+            {"specificity": "ambiguous", "user_message": "Кто подписывает договоры?"}
+        )
+        == "clarify"
+    )
+    assert (
+        graph_mod._route_after_retrieve(
+            {
+                "specificity": "specific",
+                "user_message": "Кто отвечает за организацию отчётности по проекту?",
+            }
+        )
+        == "ground"
+    )
+    # Timid label but role+topic → ground despite underspecified.
+    assert (
+        graph_mod._route_after_retrieve(
+            {
+                "specificity": "underspecified",
+                "user_message": "Кто отвечает за организацию отчётности по проекту?",
+            }
+        )
+        == "ground"
+    )
+    assert graph_mod._route_after_retrieve({}) == "clarify"
 
 
 def test_route_after_clarify_end_or_escalate() -> None:
@@ -40,6 +66,7 @@ def test_route_after_ground_answer_or_escalate() -> None:
 def _minimal_deps() -> DialogueDeps:
     embeddings = AsyncMock()
     embeddings.embed_dense = AsyncMock(return_value=[[0.1]])
+    embeddings.embed_sparse = AsyncMock(return_value=[{"q": 1.0}])
     vectorstore = AsyncMock()
     vectorstore.search = AsyncMock(return_value=[])
     llm = AsyncMock()
@@ -72,11 +99,16 @@ def test_compiled_graph_exposes_expected_nodes() -> None:
 async def test_make_nodes_assess_and_clarify() -> None:
     llm = AsyncMock()
     llm.classify_specificity = AsyncMock(return_value="ambiguous")
-    llm.complete = AsyncMock(return_value="x")
+    llm.complete = AsyncMock(
+        return_value="Уточните: договоры на закупку или с подрядчиками?"
+    )
     deps = DialogueDeps(
         llm=llm,
         retrieval=RetrievalService(
-            embeddings=AsyncMock(embed_dense=AsyncMock(return_value=[[0.1]])),
+            embeddings=AsyncMock(
+                embed_dense=AsyncMock(return_value=[[0.1]]),
+                embed_sparse=AsyncMock(return_value=[{"x": 1.0}]),
+            ),
             vectorstore=AsyncMock(search=AsyncMock(return_value=[])),
         ),
         grounding=GroundingService(),
@@ -87,13 +119,15 @@ async def test_make_nodes_assess_and_clarify() -> None:
         {"user_message": "Кто подписывает?", "history": []}
     )
     assert assessed["specificity"] == "ambiguous"
-    assert assessed["node_trace"][-1] == "assess:ambiguous"
+    assert assessed["raw_specificity"] == "ambiguous"
+    assert "assess:ambiguous(raw:ambiguous)" in assessed["node_trace"][-1]
 
     clarified = await nodes["clarify"](
         {**assessed, "clarify_turns": 0, "max_clarify_turns": 3}
     )
     assert clarified["outcome"] == "clarify"
     assert "закупк" in clarified["clarification_text"].lower()
+    llm.complete.assert_awaited()
 
 
 @pytest.mark.asyncio
@@ -112,7 +146,10 @@ async def test_make_nodes_ground_ok_and_fail() -> None:
     deps = DialogueDeps(
         llm=llm,
         retrieval=RetrievalService(
-            embeddings=AsyncMock(embed_dense=AsyncMock(return_value=[[0.1]])),
+            embeddings=AsyncMock(
+                embed_dense=AsyncMock(return_value=[[0.1]]),
+                embed_sparse=AsyncMock(return_value=[{"x": 1.0}]),
+            ),
             vectorstore=AsyncMock(search=AsyncMock(return_value=hits)),
         ),
         grounding=GroundingService(min_citations=1),

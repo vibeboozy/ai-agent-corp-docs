@@ -45,8 +45,8 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 markers = [
-  "integration: live-gated integration tests (RUN_LIVE_*)",
-  "e2e: full product path live tests (RUN_LIVE_E2E)",
+  "integration: live integration tests (run when services reachable via Settings)",
+  "e2e: full product path live tests (run when core stack is up)",
 ]
 
 [tool.ruff]

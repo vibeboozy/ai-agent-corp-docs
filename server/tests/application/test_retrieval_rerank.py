@@ -18,6 +18,9 @@ class _Emb:
     async def embed_dense(self, texts: list[str]) -> list[list[float]]:
         return [[0.1] for _ in texts]
 
+    async def embed_sparse(self, texts: list[str]) -> list[dict[str, float]]:
+        return [{"q": 1.0} for _ in texts]
+
 
 class _VS:
     def __init__(self, hits: list[dict[str, Any]]) -> None:
@@ -25,8 +28,14 @@ class _VS:
         self.last_limit: int | None = None
 
     async def search(
-        self, query: str, *, limit: int = 5, dense_vector: list[float] | None = None
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        dense_vector: list[float] | None = None,
+        sparse_vector: dict[str, float] | None = None,
     ) -> list[dict[str, Any]]:
+        _ = (dense_vector, sparse_vector)
         self.last_limit = limit
         return list(self.hits)
 
