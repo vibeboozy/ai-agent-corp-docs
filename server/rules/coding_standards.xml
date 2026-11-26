@@ -105,7 +105,7 @@
       Construction only via factory/DI reading Settings. Application services must not import Http* / Qdrant* directly.
     </rule>
     <rule id="CS-DI-04">
-      Do not add USE_STUBS, *_USE_STUB, or Stub* adapters. Tests mock ports or HTTP; product runtime is always live.
+      Product runtime uses real adapters only. Tests mock ports or HTTP; never ship fake provider adapters in app/.
     </rule>
   </section>
 

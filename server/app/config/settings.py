@@ -6,7 +6,7 @@ DO:
 - Require real provider env for runtime (LLM/embeddings/Qdrant/Docling/Postgres)
 - Document keys in .env.example
 DONT:
-- Provide USE_STUBS / *_USE_STUB switches (stubs removed)
+- Invent offline/fake provider switches
 """
 
 from __future__ import annotations

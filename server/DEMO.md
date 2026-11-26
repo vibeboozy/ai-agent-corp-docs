@@ -12,7 +12,7 @@ alembic upgrade head
 uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Connectivity: `rag-server check` (or `python -m app.cli check`) — expect `overall: ok` and `mode=live`.
+Connectivity: `rag-server check` (or `python -m app.cli check`) — expect `overall: ok`.
 
 **Body shapes:** `POST /appeals` nests the first message as `{"message":{"content":"..."}}`.
 `POST /appeals/{id}/messages` takes a **flat** body `{"content":"..."}` (not nested under `message`).

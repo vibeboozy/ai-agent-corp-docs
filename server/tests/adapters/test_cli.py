@@ -39,4 +39,5 @@ def test_module_cli_check_subprocess() -> None:
     )
     assert proc.returncode == 0
     assert "overall: ok" in proc.stdout
-    assert "mode=live" in proc.stdout
+    assert "[OK] llm" in proc.stdout
+    assert "mode=" not in proc.stdout

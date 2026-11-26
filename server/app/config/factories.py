@@ -5,7 +5,6 @@ Dependencies: Settings; adapters.* (Http*/Qdrant/SqlAlchemy/Soffice/Email)
 DO:
 - Construction of real adapters only here (CS-DI-01)
 DONT:
-- Import or construct Stub* adapters (stubs removed)
 - Let application services import Http* / Qdrant* directly
 """
 

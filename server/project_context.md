@@ -1,6 +1,6 @@
 # Project Context — Corporate RAG AI-Agent Server
 
-> Prototype deliverable under `server/`. Follow `dev_plan.xml` phases. External AI/infra services always use real adapters (LLM, embeddings, Qdrant, Docling, Postgres) wired from Settings — no stub mode.
+> Prototype deliverable under `server/`. Follow `dev_plan.xml` phases. External AI/infra services use real adapters (LLM, embeddings, Qdrant, Docling, Postgres) wired from Settings.
 >
 > **Working directory:** everything for this product lives under `server/` (this file, `rules/`, `.env.example`, `app/`). Repo root only points here.
 
@@ -22,14 +22,14 @@
 
 - Production multi-tenant auth/SSO (placeholder only).
 - Client UI (separate later; parallel to `server/` at repo root when added).
-- Offline/stub mode (removed — always real providers).
+- Fake/offline provider adapters (always use real services).
 - Perfect legal compliance certification.
 - Full LangChain RetrievalQA / LCEL-as-primary-RAG (see §2.1).
 
 ### 1.4 Product principles
 
 1. **No hallucination** — unsupported claim → clarify or escalate.
-2. **Real adapters only** — LLM/embeddings/Qdrant/Docling/Postgres via ports + DI factories (no stubs).
+2. **Real adapters only** — LLM/embeddings/Qdrant/Docling/Postgres via ports + DI factories.
 3. **Appeal-centric chat** — conversation = message list on an appeal/ticket.
 4. **Russian regulations domain** — corpus and UX language: Russian; technical identifiers: English.
 

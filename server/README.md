@@ -2,7 +2,7 @@
 
 Корпоративный RAG-агент (прототип). Архитектура, правила, план и код API живут здесь. Реализация — по фазам в `dev_plan.xml`.
 
-**Real clients only:** the app always wires live LLM, embeddings, Qdrant, Docling, LibreOffice, escalation, and Postgres adapters from env. There is no stub mode.
+**Real clients only:** the app always wires LLM, embeddings, Qdrant, Docling, LibreOffice, escalation, and Postgres adapters from env.
 
 ## What works (this vertical slice)
 
@@ -14,7 +14,7 @@
 | REST | Appeals/messages/officer-reply/stats per `CLIENT_INFO.md` |
 | Persistence | `SqlAlchemyPersistence` + Alembic (Postgres) |
 | Logging | JSON logs + `X-Request-Id` middleware; appeal audit events |
-| Connectivity | `rag-server check` + `GET /health/dependencies` (`mode=live`) |
+| Connectivity | `rag-server check` + `GET /health/dependencies` |
 
 ## Workflow & run commands
 
@@ -50,7 +50,7 @@ uvicorn app.main:app --reload --host "${APP_HOST}" --port "${APP_PORT}"
 ```
 
 - Liveness: `GET /health` and `GET /api/v1/health`
-- Dependencies: `GET /health/dependencies` (also under `/api/v1/…`) — per-service ok/fail + `mode=live`
+- Dependencies: `GET /health/dependencies` (also under `/api/v1/…`) — per-service ok/fail
 - OpenAPI: `/docs` (FastAPI UI; unrelated to corpus path)
 - Contract: [`CLIENT_INFO.md`](CLIENT_INFO.md)
 - Scripted demo: [`DEMO.md`](DEMO.md)
@@ -65,7 +65,7 @@ rag-server check
 python3 -m app.cli check
 ```
 
-Prints `overall` plus lines for `llm`, `embeddings`, `qdrant`, `docling`, `postgres` (`mode=live`). Exit `0` when all OK.
+Prints `overall` plus lines for `llm`, `embeddings`, `qdrant`, `docling`, `postgres`. Exit `0` when all OK.
 
 Optional Docling file ingest:
 

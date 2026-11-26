@@ -22,7 +22,7 @@ def test_health_dependencies_endpoint_shape(client: TestClient) -> None:
         assert len(body["dependencies"]) == 5
         names = {d["name"] for d in body["dependencies"]}
         assert names == {"llm", "embeddings", "qdrant", "docling", "postgres"}
-        assert all(d["mode"] == "live" for d in body["dependencies"])
+        assert all("mode" not in d for d in body["dependencies"])
 
 
 @pytest.mark.integration

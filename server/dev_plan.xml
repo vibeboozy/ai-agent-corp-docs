@@ -2,7 +2,7 @@
 <!--
   Phased development plan for the Corporate RAG AI-Agent server.
   Implement in order. Each phase ends with acceptance checks before the next.
-  Real adapters only: no USE_STUBS / Stub* path — live suites gated by RUN_LIVE_*.
+  Real adapters only — live suites gated by RUN_LIVE_*.
 -->
 <dev_plan project="ai-agent-corp-docs" scope="server">
 
@@ -166,7 +166,7 @@
     </deliverables>
     <acceptance>
       <check>All three criteria runnable with configured live infra</check>
-      <check>rag-server check reports mode=live for all dependencies</check>
+      <check>rag-server check reports overall ok for all dependencies</check>
     </acceptance>
   </phase>
 
@@ -174,7 +174,7 @@
     <item>Full client UI</item>
     <item>Production SSO</item>
     <item>Multi-region Qdrant HA</item>
-    <item>Stub / offline mode (explicitly removed)</item>
+    <item>Fake/offline provider adapters</item>
   </out_of_scope_until_later>
 
 </dev_plan>

@@ -74,7 +74,7 @@
 
   <section id="adapters" title="Real adapters and configuration">
     <rule id="ANC-ADAPT-01" priority="critical">
-      Runtime always uses real LLM/embeddings/Qdrant/Docling/Postgres clients from Settings. No stub mode.
+      Runtime always uses real LLM/embeddings/Qdrant/Docling/Postgres clients from Settings.
     </rule>
     <rule id="ANC-ADAPT-02">
       Live corpus must support demos: grounded hit, ambiguous multi-hit, empty/out-of-KB hit.

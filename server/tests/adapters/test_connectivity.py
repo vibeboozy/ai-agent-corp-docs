@@ -35,7 +35,7 @@ async def test_connectivity_report_shape_with_mocks() -> None:
     assert names == {"llm", "embeddings", "qdrant", "docling", "postgres"}
     for dep in report["dependencies"]:
         assert dep["ok"] is True
-        assert dep["mode"] == "live"
+        assert "mode" not in dep
 
 
 @pytest.mark.asyncio
@@ -61,7 +61,7 @@ async def test_connectivity_degraded_on_ping_failure() -> None:
     assert report["status"] == "degraded"
     qdrant = next(d for d in report["dependencies"] if d["name"] == "qdrant")
     assert qdrant["ok"] is False
-    assert qdrant["mode"] == "live"
+    assert "mode" not in qdrant
 
 
 @pytest.mark.integration
@@ -110,4 +110,4 @@ async def test_live_postgres_ping_via_connectivity() -> None:
     report = await c.connectivity.check_report()
     pg = next(d for d in report["dependencies"] if d["name"] == "postgres")
     assert pg["ok"] is True
-    assert pg["mode"] == "live"
+    assert "mode" not in pg

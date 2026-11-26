@@ -11,7 +11,7 @@
     </rule>
     <rule id="TEST-GEN-02">
       Default CI: RUN_LIVE_*=0. Unit/contract tests must not require network to
-      LLM/embeddings/Qdrant/Docling/Postgres. There is no stub mode.
+      LLM/embeddings/Qdrant/Docling/Postgres.
     </rule>
     <rule id="TEST-GEN-03">
       Markers: unit (default), contract, behavior, integration, e2e, demo.
@@ -157,7 +157,7 @@
       Do not assert on live model wording; assert on structure, citations, status, and policy outcomes.
     </rule>
     <rule id="TEST-NO-04">
-      Do not reintroduce USE_STUBS, *_USE_STUB, or Stub* adapters under app/adapters/stubs/.
+      Product runtime must use real provider adapters only; unit tests mock ports or HTTP.
     </rule>
   </section>
 

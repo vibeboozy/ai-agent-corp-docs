@@ -1,12 +1,11 @@
 """
 ANCHOR: app.application.connectivity.service
-PURPOSE: Probe LLM/embeddings/Qdrant/Docling/Postgres health (live adapters).
+PURPOSE: Probe LLM/embeddings/Qdrant/Docling/Postgres health.
 Dependencies: adapter ports via Container
 DO:
 - Report per-service ok/fail without leaking secrets
 DONT:
 - Fail the process health endpoint on optional upstream outages alone
-- Report stub mode (stubs removed)
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from typing import Any, Awaitable, Callable
 class DependencyStatus:
     name: str
     ok: bool
-    mode: str  # always "live"
     detail: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -36,20 +34,18 @@ async def _safe_ping(
         return DependencyStatus(
             name=name,
             ok=ok,
-            mode="live",
             detail=None if ok else "ping returned false",
         )
     except Exception as exc:  # noqa: BLE001 — surface adapter failures as status
         return DependencyStatus(
             name=name,
             ok=False,
-            mode="live",
             detail=type(exc).__name__,
         )
 
 
 class ConnectivityService:
-    """Run connectivity probes against DI-wired live adapters."""
+    """Run connectivity probes against DI-wired adapters."""
 
     def __init__(
         self,

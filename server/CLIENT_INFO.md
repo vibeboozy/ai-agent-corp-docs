@@ -308,7 +308,7 @@ Do **not** invent answers client-side. Display citations when present; link/docu
 
 Appeals, messages, escalations, audit, and stats aggregates are stored in **PostgreSQL** (see server `project_context.md`). After a server restart, `GET` list/history/stats must return the same data. Clients can rely on durable IDs.
 
-The server always uses live LLM/embeddings/Qdrant/Docling/Postgres (no stub mode). `GET /health/dependencies` reports per-service `mode=live`.
+The server uses real LLM/embeddings/Qdrant/Docling/Postgres clients. `GET /health/dependencies` reports per-service ok/fail.
 
 ---
 

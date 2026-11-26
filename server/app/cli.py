@@ -6,7 +6,7 @@ DO:
 - Print per-dependency ok/fail without secrets
 - Expose via console_scripts `rag-server` and `python -m app.cli`
 DONT:
-- Hide dependency failures (always probes live adapters)
+- Hide dependency failures (always probes real adapters)
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ def _print_report(report: dict) -> int:
     for dep in report.get("dependencies") or []:
         mark = "OK" if dep.get("ok") else "FAIL"
         detail = f" ({dep['detail']})" if dep.get("detail") else ""
-        print(f"  [{mark}] {dep.get('name')} mode={dep.get('mode')}{detail}")
+        print(f"  [{mark}] {dep.get('name')}{detail}")
     return 0 if status == "ok" else 1
 
 
