@@ -286,8 +286,8 @@ Documented in `.env.example` (this directory). Groups:
 - **LLM** — OpenAI-compatible chat completions (`LLM_BASE_URL` without `/chat/completions`)
 - **Embeddings** — dense + sparse bge-m3
 - **Qdrant** — URL, key, collection alias, timeouts, upsert batch (local `:6333` vs Cloud `:443`)
-- **Docling** — base URL, OCR, chunker, concurrency
-- **Rerank / Retrieval** — mode, candidates, prefetch, prefer latest
+- **Docling** — base URL, OCR langs, split pages, HybridChunker max/overlap/min tokens, concurrency/timeouts
+- **Rerank / Retrieval** — `RERANK_MODE=none|llm`, candidates, top_k, max_per_doc, min_score; prefetch, prefer latest
 - **Quality** — `QUALITY_SERVICE_EMAIL`, escalation toggles
 - **Cache / Log** — operational knobs
 - **Live tests** — `RUN_LIVE_TESTS`, `RUN_LIVE_LLM`, `RUN_LIVE_EMBEDDINGS`, `RUN_LIVE_QDRANT`, `RUN_LIVE_DOCLING`, `RUN_LIVE_POSTGRES`, `RUN_LIVE_E2E`

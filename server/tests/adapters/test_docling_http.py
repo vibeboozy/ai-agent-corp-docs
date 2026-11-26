@@ -63,8 +63,13 @@ async def test_http_docling_posts_v1_file_source(
     assert sources[0]["kind"] == "file"
     assert sources[0]["filename"] == "reg.docx"
     assert sources[0]["base64_string"] == base64.b64encode(doc.read_bytes()).decode("ascii")
+    opts = captured["json"]["options"]
+    assert opts["do_ocr"] is True
+    assert "ru" in opts["ocr_lang"]
+    assert "md_page_break_placeholder" in opts
     assert result["chunks"]
     assert "регламента" in result["chunks"][0]["text"].lower()
+    assert result["chunker"] == "HybridChunker"
 
 
 @pytest.mark.asyncio

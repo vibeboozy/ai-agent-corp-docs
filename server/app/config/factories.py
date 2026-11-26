@@ -95,6 +95,15 @@ def _build_docling(settings: Settings) -> Any:
         base_url=settings.docling_base_url,
         api_key=settings.docling_api_key,
         timeout_s=settings.docling_timeout_s,
+        connect_timeout_s=settings.docling_connect_timeout_s,
+        concurrency=settings.docling_concurrency,
+        split_pages=settings.docling_split_pages,
+        ocr_langs=settings.docling_ocr_langs,
+        chunker=settings.docling_chunker,
+        chunk_tokenizer=settings.docling_chunk_tokenizer,
+        chunk_max_tokens=settings.docling_chunk_max_tokens,
+        chunk_overlap_tokens=settings.docling_chunk_overlap_tokens,
+        chunk_min_tokens=settings.docling_chunk_min_tokens,
         allow_hosts=settings.egress_hosts(),
     )
 
@@ -147,6 +156,13 @@ def build_container(settings: Settings | None = None) -> Container:
         vectorstore=vectorstore,
         prefetch=settings.retrieval_prefetch,
         prefer_latest=settings.retrieval_prefer_latest,
+        rerank_mode=settings.rerank_mode,
+        rerank_candidates=settings.rerank_candidates,
+        rerank_top_k=settings.rerank_top_k,
+        rerank_max_per_doc=settings.rerank_max_per_doc,
+        rerank_min_score=settings.rerank_min_score,
+        llm=llm,
+        rerank_llm_model=settings.rerank_llm_model,
     )
     grounding = GroundingService(
         min_citations=settings.grounding_min_citations,

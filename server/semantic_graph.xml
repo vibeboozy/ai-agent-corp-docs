@@ -209,7 +209,7 @@
     <!-- Retrieval -->
     <edge from="retrieval" to="adapter_embeddings" type="calls"/>
     <edge from="retrieval" to="adapter_qdrant" type="calls"/>
-    <edge from="retrieval" to="adapter_llm" type="calls" optional="true" when="future llm rerank"/>
+    <edge from="retrieval" to="adapter_llm" type="calls" optional="true" when="RERANK_MODE=llm"/>
 
     <!-- Ingest -->
     <edge from="ingest" to="adapter_libreoffice" type="calls" optional="true"/>

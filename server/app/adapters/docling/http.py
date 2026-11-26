@@ -1,17 +1,19 @@
 """
 ANCHOR: app.adapters.docling.HttpDoclingClient
-PURPOSE: HTTP Docling convert client (live).
-Dependencies: httpx
+PURPOSE: HTTP Docling convert client with OCR options + HybridChunker-style chunking.
+Dependencies: httpx; Settings DOCLING_*
 CRITICAL: Docling Serve ≥1.x uses POST /v1/convert/source with sources[].
 DO:
 - FileSourceRequest (kind=file, base64_string, filename) for local/docx/text
 - HttpSourceRequest (kind=http, url) for remote URLs
+- Apply HybridChunker token window (max/overlap/min) after convert
 DONT:
 - POST legacy /convert or file_sources/http_sources fields (422 on 1.26)
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 from pathlib import Path
 from typing import Any
@@ -24,24 +26,80 @@ from app.adapters.docling.port import DoclingClient
 from app.domain.errors import AppError, UpstreamTimeoutError
 
 
-def _chunk_text(body: str, *, source_path: str | None = None) -> dict[str, Any]:
-    paragraphs = [p.strip() for p in body.split("\n") if p.strip()] or ([body] if body else [])
-    chunks = [
-        {
-            "chunk_id": f"docling-{uuid4().hex[:8]}",
-            "text": p,
-            "token_count": max(1, len(p.split())),
+def _approx_tokens(text: str) -> list[str]:
+    """Whitespace tokenization stand-in for BAAI/bge-m3 (no heavy tokenizer dep)."""
+    return [t for t in (text or "").split() if t]
+
+
+def hybrid_chunk_text(
+    body: str,
+    *,
+    source_path: str | None = None,
+    chunker: str = "HybridChunker",
+    tokenizer: str = "BAAI/bge-m3",
+    max_tokens: int = 512,
+    overlap_tokens: int = 64,
+    min_tokens: int = 32,
+) -> dict[str, Any]:
+    """
+    Split converted document text into overlapping windows.
+
+    Mimics HybridChunker sizing from DOCLING_CHUNK_* env without shipping the
+    full Docling ML stack in-process.
+    """
+    max_tokens = max(1, int(max_tokens))
+    overlap_tokens = max(0, min(int(overlap_tokens), max_tokens - 1))
+    min_tokens = max(1, int(min_tokens))
+    tokens = _approx_tokens(body)
+    chunks: list[dict[str, Any]] = []
+    if not tokens:
+        return {
+            "source_path": source_path,
+            "chunks": [],
+            "text": body,
+            "chunker": chunker,
+            "tokenizer": tokenizer,
         }
-        for p in paragraphs
-    ]
-    return {"source_path": source_path, "chunks": chunks, "text": body}
+
+    if len(tokens) <= max_tokens:
+        chunks.append(
+            {
+                "chunk_id": f"docling-{uuid4().hex[:8]}",
+                "text": " ".join(tokens),
+                "token_count": len(tokens),
+            }
+        )
+    else:
+        step = max(1, max_tokens - overlap_tokens)
+        start = 0
+        while start < len(tokens):
+            window = tokens[start : start + max_tokens]
+            if len(window) < min_tokens and chunks:
+                break
+            chunks.append(
+                {
+                    "chunk_id": f"docling-{uuid4().hex[:8]}",
+                    "text": " ".join(window),
+                    "token_count": len(window),
+                }
+            )
+            if start + max_tokens >= len(tokens):
+                break
+            start += step
+
+    return {
+        "source_path": source_path,
+        "chunks": chunks,
+        "text": body,
+        "chunker": chunker,
+        "tokenizer": tokenizer,
+    }
 
 
 def _extract_text(data: dict[str, Any]) -> str:
     """Best-effort text extraction from Docling Serve v1 convert response."""
     if not isinstance(data, dict):
         return str(data)
-    # Common shapes: document / documents[] with md_content | text_content | json_content
     docs: list[Any] = []
     if "document" in data and data["document"] is not None:
         docs.append(data["document"])
@@ -79,26 +137,58 @@ class HttpDoclingClient:
         base_url: str,
         api_key: str | None,
         timeout_s: float = 300.0,
+        connect_timeout_s: float = 30.0,
+        concurrency: int = 2,
+        split_pages: bool = True,
+        ocr_langs: str = "ru,en",
+        chunker: str = "HybridChunker",
+        chunk_tokenizer: str = "BAAI/bge-m3",
+        chunk_max_tokens: int = 512,
+        chunk_overlap_tokens: int = 64,
+        chunk_min_tokens: int = 32,
         allow_hosts: set[str] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = timeout_s
+        self._connect_timeout = connect_timeout_s
+        self._semaphore = asyncio.Semaphore(max(1, int(concurrency)))
+        self._split_pages = split_pages
+        self._ocr_langs = [p.strip() for p in (ocr_langs or "").split(",") if p.strip()]
+        self._chunker = chunker
+        self._chunk_tokenizer = chunk_tokenizer
+        self._chunk_max_tokens = chunk_max_tokens
+        self._chunk_overlap_tokens = chunk_overlap_tokens
+        self._chunk_min_tokens = chunk_min_tokens
         self._allow_hosts = allow_hosts or set()
         if self._allow_hosts:
             host = (urlparse(self._base_url).hostname or "").lower()
             if host and host not in self._allow_hosts:
                 raise AppError(f"Docling host not allowlisted: {host}", code="EGRESS_DENIED")
 
+    def _httpx_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(self._timeout, connect=self._connect_timeout)
+
     def _headers(self, *, json_body: bool = False) -> dict[str, str]:
         headers: dict[str, str] = {}
         if json_body:
             headers["Content-Type"] = "application/json"
         if self._api_key:
-            # Docling Serve accepts X-Api-Key; Bearer kept for compatible proxies.
             headers["X-Api-Key"] = self._api_key
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
+
+    def _convert_options(self) -> dict[str, Any]:
+        options: dict[str, Any] = {
+            "to_formats": ["md", "text"],
+            "do_ocr": bool(self._ocr_langs),
+        }
+        if self._ocr_langs:
+            options["ocr_lang"] = list(self._ocr_langs)
+        if self._split_pages:
+            # Page-break placeholder helps HybridChunker keep section boundaries.
+            options["md_page_break_placeholder"] = "\n\n<!-- page-break -->\n\n"
+        return options
 
     def _build_sources(
         self, *, source_path: str | None, text: str | None
@@ -120,8 +210,7 @@ class HttpDoclingClient:
     async def ping(self) -> bool:
         headers = self._headers()
         try:
-            async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
-                # Prefer /health; fall back to base URL / OpenAPI.
+            async with httpx.AsyncClient(timeout=self._httpx_timeout()) as client:
                 for path in ("/health", "/docs", "/", ""):
                     url = f"{self._base_url}{path}" if path else self._base_url
                     resp = await client.get(url, headers=headers)
@@ -137,38 +226,46 @@ class HttpDoclingClient:
         sources = self._build_sources(source_path=source_path, text=text)
         payload: dict[str, Any] = {
             "sources": sources,
-            "options": {
-                "to_formats": ["md", "text"],
-            },
+            "options": self._convert_options(),
         }
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                resp = await client.post(
-                    f"{self._base_url}/v1/convert/source",
-                    headers=self._headers(json_body=True),
-                    json=payload,
-                )
-                if resp.status_code == 422:
-                    raise AppError(
-                        f"Docling validation error (422): {resp.text}",
-                        code="UPSTREAM_VALIDATION",
+        async with self._semaphore:
+            try:
+                async with httpx.AsyncClient(timeout=self._httpx_timeout()) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/v1/convert/source",
+                        headers=self._headers(json_body=True),
+                        json=payload,
                     )
-                resp.raise_for_status()
-                data = resp.json()
-        except UpstreamTimeoutError:
-            raise
-        except AppError:
-            raise
-        except httpx.TimeoutException as exc:
-            raise UpstreamTimeoutError("Docling request timed out") from exc
-        except httpx.HTTPError as exc:
-            raise AppError("Docling upstream error", code="UPSTREAM_ERROR") from exc
+                    if resp.status_code == 422:
+                        raise AppError(
+                            f"Docling validation error (422): {resp.text}",
+                            code="UPSTREAM_VALIDATION",
+                        )
+                    resp.raise_for_status()
+                    data = resp.json()
+            except UpstreamTimeoutError:
+                raise
+            except AppError:
+                raise
+            except httpx.TimeoutException as exc:
+                raise UpstreamTimeoutError("Docling request timed out") from exc
+            except httpx.HTTPError as exc:
+                raise AppError("Docling upstream error", code="UPSTREAM_ERROR") from exc
 
         body = _extract_text(data if isinstance(data, dict) else {})
         if not body and text:
             body = text
-        result = _chunk_text(body, source_path=source_path)
+        result = hybrid_chunk_text(
+            body,
+            source_path=source_path,
+            chunker=self._chunker,
+            tokenizer=self._chunk_tokenizer,
+            max_tokens=self._chunk_max_tokens,
+            overlap_tokens=self._chunk_overlap_tokens,
+            min_tokens=self._chunk_min_tokens,
+        )
         result["raw"] = data
+        result["options"] = payload["options"]
         return result
 
 

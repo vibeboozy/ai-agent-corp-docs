@@ -41,6 +41,8 @@ cp .env.example .env
 
 **Docs corpus (local only):** set `DOCS_CORPUS_PATH` (default `docs`) or `DOCS_DIR`. The folder is **gitignored** — create it locally for ingest (`mkdir -p docs`); do not commit regulation files.
 
+**Ingest / retrieval knobs:** `DOCLING_*` (OCR, HybridChunker window sizes, concurrency) and `RERANK_MODE=none|llm` (with `RERANK_CANDIDATES` / `RERANK_TOP_K`) — see `.env.example`.
+
 ### 3. Run API
 
 ```bash

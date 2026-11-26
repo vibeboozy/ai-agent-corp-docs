@@ -83,10 +83,31 @@ class Settings(BaseSettings):
     )
     docling_api_key: str | None = Field(default=None, alias="DOCLING_API_KEY")
     docling_timeout_s: float = Field(default=300.0, alias="DOCLING_TIMEOUT_S")
+    docling_connect_timeout_s: float = Field(default=30.0, alias="DOCLING_CONNECT_TIMEOUT_S")
+    docling_concurrency: int = Field(default=2, alias="DOCLING_CONCURRENCY")
+    docling_split_pages: bool = Field(default=True, alias="DOCLING_SPLIT_PAGES")
+    docling_ocr_langs: str = Field(default="ru,en", alias="DOCLING_OCR_LANGS")
+    docling_chunker: str = Field(default="HybridChunker", alias="DOCLING_CHUNKER")
+    docling_chunk_tokenizer: str = Field(
+        default="BAAI/bge-m3", alias="DOCLING_CHUNK_TOKENIZER"
+    )
+    docling_chunk_max_tokens: int = Field(default=512, alias="DOCLING_CHUNK_MAX_TOKENS")
+    docling_chunk_overlap_tokens: int = Field(
+        default=64, alias="DOCLING_CHUNK_OVERLAP_TOKENS"
+    )
+    docling_chunk_min_tokens: int = Field(default=32, alias="DOCLING_CHUNK_MIN_TOKENS")
 
     # --- libreoffice ---
     libreoffice_soffice_path: str = Field(default="soffice", alias="LIBREOFFICE_SOFFICE_PATH")
     libreoffice_timeout_s: float = Field(default=120.0, alias="LIBREOFFICE_TIMEOUT_S")
+
+    # --- rerank ---
+    rerank_mode: str = Field(default="none", alias="RERANK_MODE")  # none | llm
+    rerank_llm_model: str | None = Field(default=None, alias="RERANK_LLM_MODEL")
+    rerank_candidates: int = Field(default=20, alias="RERANK_CANDIDATES")
+    rerank_top_k: int = Field(default=5, alias="RERANK_TOP_K")
+    rerank_max_per_doc: int = Field(default=3, alias="RERANK_MAX_PER_DOC")
+    rerank_min_score: float = Field(default=0.0, alias="RERANK_MIN_SCORE")
 
     # --- retrieval / dialogue / grounding ---
     retrieval_prefetch: int = Field(default=50, alias="RETRIEVAL_PREFETCH")
