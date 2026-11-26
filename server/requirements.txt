@@ -1,0 +1,3 @@
+# Placeholder lock-style install for local smoke.
+# Prefer: pip install -e ".[dev]" from server/
+-e .[dev]

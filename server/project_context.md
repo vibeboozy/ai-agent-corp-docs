@@ -74,27 +74,37 @@
     dev_plan.xml
     rules/
     .env.example
-    pyproject.toml          # later phases
+    pyproject.toml
+    ANCHOR.md               # module docstring anchor guide
     app/
+      main.py               # FastAPI entry
       api/
       application/
-        dialogue/           # LangGraph StateGraph lives here
+        appeals/
+        dialogue/           # LangGraph StateGraph lives here (graph.py, nodes, state)
         grounding/
         retrieval/
-        ...
+        ingest/
+        learning/
+        quality_escalation/
       domain/
       adapters/
         llm/
         embeddings/
-        vectorstore/
+        vectorstore/        # Qdrant
         docling/
         libreoffice/
         escalation/
         persistence/        # Postgres SQLAlchemy + StubPersistence
         stubs/
       config/
+      logging/
     docs/                   # RAG corpus (docx)
     tests/
+      api/
+      application/
+      adapters/
+      domain/
       integration/          # live-gated
     CLIENT_INFO.md          # REST contract for future client agent
 ```

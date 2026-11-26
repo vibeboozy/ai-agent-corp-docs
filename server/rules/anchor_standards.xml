@@ -107,4 +107,30 @@
     </rule>
   </section>
 
+  <section id="module_markup" title="Module file anchor markup">
+    <!--
+      Code-file headers for agent navigation. Human guide: server/ANCHOR.md.
+      Distinct from grounding/clarify/escalate behavioral anchors above.
+    -->
+    <rule id="ANC-MARK-01" priority="critical">
+      Every Python module under server/app/ and server/tests/ MUST begin with a module docstring
+      containing ANCHOR (dotted module name), PURPOSE, and Dependencies.
+    </rule>
+    <rule id="ANC-MARK-02">
+      Include CRITICAL when the module enforces or sits on a success-criterion path
+      (grounding, escalate, clarify, learn, stubs-default). Cite ANC-* / CS-* ids when possible.
+    </rule>
+    <rule id="ANC-MARK-03">
+      Include DO / DONT bullet lists when the module has recurring agent pitfalls
+      (e.g. routers must not call adapters; graph must not skip grounding).
+    </rule>
+    <rule id="ANC-MARK-04">
+      Do not invent large undocumented packages: mirror paths in project_context.md / semantic_graph.xml;
+      update those docs lightly if names must diverge.
+    </rule>
+    <rule id="ANC-MARK-05">
+      Full authoring guide: server/ANCHOR.md (linked from server/README.md).
+    </rule>
+  </section>
+
 </anchor_standards>
