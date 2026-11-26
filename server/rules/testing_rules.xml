@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Testing rules — stubs by default; live LLM/embeddings/Qdrant/Docling gated by env.
+  Scope: server/
+-->
+<testing_rules scope="server">
+
+  <section id="general" title="General">
+    <rule id="TEST-GEN-01">
+      Framework: pytest + pytest-asyncio. Prefer httpx ASGITransport for API tests.
+    </rule>
+    <rule id="TEST-GEN-02">
+      Default test settings: USE_STUBS=true and all *_USE_STUB=true. CI must not require network to
+      LLM/embeddings/Qdrant/Docling.
+    </rule>
+    <rule id="TEST-GEN-03">
+      Markers: unit (default), contract, behavior, integration, e2e, demo.
+      Live suites use @pytest.mark.integration and/or @pytest.mark.e2e and skip unless the matching RUN_LIVE_* flag is set.
+    </rule>
+    <rule id="TEST-GEN-04">
+      Deterministic stubs: fixed fixture answers for the same input; no wall-clock flakiness.
+    </rule>
+    <rule id="TEST-GEN-05">
+      Working directory for pytest: server/ (or configure pytest rootdir to server/).
+    </rule>
+  </section>
+
+  <section id="unit" title="Unit tests with stubs">
+    <rule id="TEST-UNIT-01">
+      Unit-test dialogue LangGraph nodes, grounding, learning, escalation with injected Stub* clients — no FastAPI required.
+    </rule>
+    <rule id="TEST-UNIT-02">
+      VectorStore stub returns controllable hit lists to exercise RRF/rerank/prefer-latest branches.
+    </rule>
+    <rule id="TEST-UNIT-03">
+      LLM stub can return scripted clarify vs answer drafts; grounding must still enforce citations from retrieval stub.
+    </rule>
+    <rule id="TEST-UNIT-04">
+      Assert graph routing: underspecified → clarify; supported hits → answer; empty/unsupported → escalate.
+    </rule>
+  </section>
+
+  <section id="contract" title="REST contract tests">
+    <rule id="TEST-API-01">
+      Contract tests for every endpoint in project_context REST table: status codes, schema, error shape.
+    </rule>
+    <rule id="TEST-API-02">
+      OpenAPI schema generation must succeed in CI; breaking field renames require version bump discussion.
+    </rule>
+    <rule id="TEST-API-03">
+      Persistence unit tests use StubPersistence (or isolated schema). No shared mutable DB state across tests.
+    </rule>
+    <rule id="TEST-API-04">
+      Restart durability: with Postgres + PERSISTENCE_USE_STUB=false, create appeal/messages, dispose engine,
+      reconnect, assert history and stats still present (integration / RUN_LIVE_POSTGRES).
+    </rule>
+  </section>
+
+  <section id="behavior" title="Groundedness and escalation behavior (stubs)">
+    <rule id="TEST-BEH-01">
+      When stub retrieval returns empty/insufficient hits: response is escalate or clarify — never a fabricated regulation quote.
+    </rule>
+    <rule id="TEST-BEH-02">
+      When hits support the answer: response includes citations with chunk/document ids present in stub corpus.
+    </rule>
+    <rule id="TEST-BEH-03">
+      Underspecified user question: assistant asks clarifying question; appeal status clarifying;
+      no premature escalate unless max clarify turns exceeded.
+    </rule>
+    <rule id="TEST-BEH-04">
+      Officer-reply: creates officer message, triggers learning/ingest stub, subsequent query can answer from updated stub KB.
+    </rule>
+    <rule id="TEST-BEH-05">
+      Assert audit/log events (or persistence audit rows) for escalate and learn paths.
+    </rule>
+  </section>
+
+  <section id="live_flags" title="Live test environment flags">
+    <rule id="TEST-LIVE-01">
+      Master switch: RUN_LIVE_TESTS=1 enables the integration marker suite (still respects per-service readiness).
+    </rule>
+    <rule id="TEST-LIVE-02">
+      Per-service gates (smoke): RUN_LIVE_LLM=1, RUN_LIVE_EMBEDDINGS=1, RUN_LIVE_QDRANT=1, RUN_LIVE_DOCLING=1,
+      RUN_LIVE_POSTGRES=1. Each test skips unless its gate is set AND the corresponding *_USE_STUB=false
+      AND required URL/key env vars are non-empty (DATABASE_URL for Postgres).
+    </rule>
+    <rule id="TEST-LIVE-03">
+      Full product path: RUN_LIVE_E2E=1 requires USE_STUBS=false (or all critical adapters live) and keys for
+      LLM + embeddings + Qdrant + Postgres at minimum; Docling required only for ingest scenarios.
+    </rule>
+    <rule id="TEST-LIVE-04">
+      Missing flags or secrets → pytest.skip with a clear reason. Never fail CI because live infra is absent.
+    </rule>
+    <rule id="TEST-LIVE-05">
+      Before live runs: copy .env.example → .env, set real base URLs/keys, set USE_STUBS=false and the needed *_USE_STUB=false.
+    </rule>
+  </section>
+
+  <section id="live_smoke" title="Live per-resource smoke tests">
+    <rule id="TEST-SMOKE-01">
+      LLM: one chat completion round-trip; assert non-empty content and latency under LLM_TIMEOUT_S.
+    </rule>
+    <rule id="TEST-SMOKE-02">
+      Embeddings: embed a short Russian string; assert dense dim == EMBEDDINGS_DENSE_DIM; sparse vector present if API returns it.
+    </rule>
+    <rule id="TEST-SMOKE-03">
+      Qdrant: ensure collection/alias reachable; upsert one fixture point; search returns it; cleanup or use dedicated test collection.
+    </rule>
+    <rule id="TEST-SMOKE-04">
+      Docling: convert a tiny fixture docx (or PDF); assert chunks non-empty; honor DOCLING_TIMEOUT_S.
+    </rule>
+    <rule id="TEST-SMOKE-05">
+      LibreOffice: optional; skip if soffice binary missing even when RUN_LIVE_DOCLING=1 unless RUN_LIVE_LIBREOFFICE=1.
+    </rule>
+    <rule id="TEST-SMOKE-06">
+      Postgres: connect via DATABASE_URL; insert/select appeal+message; assert row survives new session (restart durability).
+    </rule>
+  </section>
+
+  <section id="live_e2e" title="Live integration / e2e product scenarios">
+    <rule id="TEST-E2E-01">
+      Groundedness: ask a question answerable from ingested live corpus; assert message_kind=answer and citations
+      reference real chunk/document ids from Qdrant/persistence. Do not assert exact LLM wording.
+    </rule>
+    <rule id="TEST-E2E-02">
+      Clarifying dialogue: send underspecified question; assert clarification message and clarifying status;
+      then supply details; assert eventual answer or escalate per policy.
+    </rule>
+    <rule id="TEST-E2E-03">
+      Escalation: ask out-of-KB question; assert escalation entity, user notice, no invented citations.
+    </rule>
+    <rule id="TEST-E2E-04">
+      Officer-reply learning: after escalate, POST officer-reply; assert KB update (ingest) and that a follow-up
+      similar question can be answered with citations (may require short wait/index refresh).
+    </rule>
+    <rule id="TEST-E2E-05">
+      Prefer isolated Qdrant collection or alias suffix (_test) for e2e; never wipe production alias in shared envs.
+    </rule>
+    <rule id="TEST-E2E-06">
+      Example commands (from server/):
+      USE_STUBS=true pytest
+      USE_STUBS=false RUN_LIVE_LLM=1 RUN_LIVE_EMBEDDINGS=1 pytest -m integration
+      USE_STUBS=false RUN_LIVE_TESTS=1 pytest -m integration
+      USE_STUBS=false RUN_LIVE_E2E=1 pytest -m e2e
+    </rule>
+  </section>
+
+  <section id="forbidden" title="Forbidden in default CI">
+    <rule id="TEST-NO-01">
+      No real HTTP to LLM_BASE_URL / EMBEDDINGS_BASE_URL / QDRANT_URL / DOCLING_BASE_URL unless a RUN_LIVE_* flag is set.
+    </rule>
+    <rule id="TEST-NO-02">
+      No dependency on soffice binary in default unit tests — StubLibreOffice only.
+    </rule>
+    <rule id="TEST-NO-03">
+      Do not assert on live model wording; assert on structure, citations, status, and policy outcomes.
+    </rule>
+  </section>
+
+  <section id="demo" title="Demo scenarios">
+    <rule id="TEST-DEMO-01">
+      Provide pytest markers or scripts for the three prototype success criteria (grounded, clarify, learn) runnable offline.
+    </rule>
+    <rule id="TEST-DEMO-02">
+      Same scenarios should be invokable with RUN_LIVE_E2E=1 when infra is available; document both paths in README.
+    </rule>
+  </section>
+
+</testing_rules>

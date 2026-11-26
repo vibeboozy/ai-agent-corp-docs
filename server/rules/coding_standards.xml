@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Coding standards for server/ — LLM-consumable rules -->
+<coding_standards scope="server" language="python">
+
+  <section id="layout" title="Project layout">
+    <rule id="CS-LAYOUT-01">
+      All server code lives under server/. Do not place application packages at repo root.
+    </rule>
+    <rule id="CS-LAYOUT-02">
+      Prefer layers: server/app/api/, application/, domain/, adapters/, config/.
+      Cross-cutting logging may live under server/app/logging/ or shared utils.
+    </rule>
+    <rule id="CS-LAYOUT-03">
+      RAG corpus docx files live under server/docs/. Rules/context live under server/ and server/rules/ — not at repo root.
+    </rule>
+    <rule id="CS-LAYOUT-04">
+      Tests under server/tests/ mirroring app packages (tests/api, tests/application, tests/adapters, tests/integration).
+    </rule>
+    <rule id="CS-LAYOUT-05">
+      Project artifacts (project_context.md, semantic_graph.xml, dev_plan.xml, rules/, README.md, .env.example)
+      live under server/. Repo root README only points to server/. Do not reintroduce duplicates at repo root.
+    </rule>
+  </section>
+
+  <section id="langgraph" title="LangGraph and LangChain">
+    <rule id="CS-LG-01">
+      Dialogue orchestration uses LangGraph StateGraph under server/app/application/dialogue/.
+    </rule>
+    <rule id="CS-LG-02">
+      Graph nodes call our ports (LLMClient, EmbeddingsClient, VectorStore, etc.) via DI — never hard-code Stub* or Http*.
+    </rule>
+    <rule id="CS-LG-03">
+      Do not use LangChain RetrievalQA, LCEL RAG chains, or LangChain vectorstore/docling wrappers as the primary RAG path.
+    </rule>
+    <rule id="CS-LG-04">
+      langchain-core is optional for message types only. Prefer domain Message models for persistence and API DTOs.
+    </rule>
+    <rule id="CS-LG-05">
+      Pin modern langgraph (and langchain-core if used) in pyproject.toml; keep stubs-first — graph must run offline.
+    </rule>
+  </section>
+
+  <section id="style" title="Python style and typing">
+    <rule id="CS-STYLE-01">
+      Target Python 3.12+ (3.13 if environment supports). Use modern syntax: list[], | unions, match where clear.
+    </rule>
+    <rule id="CS-STYLE-02">
+      Full type hints on public functions; Pydantic v2 models for API and settings.
+    </rule>
+    <rule id="CS-STYLE-03">
+      Formatter/linter: ruff. Typecheck: mypy or pyright — fail on untyped adapter boundaries.
+    </rule>
+    <rule id="CS-STYLE-04">
+      Async by default for I/O (FastAPI endpoints, httpx, DB if async driver). CPU-bound soffice may use thread pool.
+    </rule>
+    <rule id="CS-STYLE-05">
+      Identifiers, modules, JSON field names in English. User-facing message strings may be Russian.
+    </rule>
+    <rule id="CS-STYLE-06">
+      No wildcard imports. Explicit __all__ only when defining a public package API.
+    </rule>
+  </section>
+
+  <section id="dependencies" title="Dependency policy">
+    <rule id="CS-DEP-01">
+      Declare dependencies in server/pyproject.toml. Pin compatible ranges; prefer latest stable majors known good for
+      FastAPI, Pydantic v2, httpx, qdrant-client, langgraph (optional langchain-core), SQLAlchemy 2.x, asyncpg, alembic.
+    </rule>
+    <rule id="CS-DEP-02">
+      Do not add heavy ML stacks into the API process unless required; call remote Docling/embeddings/LLM via adapters.
+    </rule>
+    <rule id="CS-DEP-03">
+      Dev/test extras: pytest, pytest-asyncio, ruff, httpx (ASGI). Keep CI lean.
+    </rule>
+  </section>
+
+  <section id="api" title="API conventions">
+    <rule id="CS-API-01">
+      Prefix /api/v1. Consistent error body: { "detail": ..., "code": "SNAKE_CASE" }.
+    </rule>
+    <rule id="CS-API-02">
+      Use plural resources: /appeals, nested /appeals/{id}/messages.
+    </rule>
+    <rule id="CS-API-03">
+      Side-effectful learning action: POST /appeals/{id}/officer-reply (not a silent message append).
+    </rule>
+    <rule id="CS-API-04">
+      Return citation objects on grounded answers; never omit when message_kind=answer.
+    </rule>
+    <rule id="CS-API-05">
+      HTTP status: 201 create; 404 missing appeal; 409 illegal status transition; 422 validation.
+    </rule>
+  </section>
+
+  <section id="stubs" title="Stub naming and factories">
+    <rule id="CS-STUB-01">
+      Protocols/ABCs named without Stub prefix (e.g. LLMClient, EmbeddingsClient, VectorStore).
+    </rule>
+    <rule id="CS-STUB-02">
+      Stub implementations: StubLLMClient, StubEmbeddingsClient, StubVectorStore, StubDoclingClient,
+      StubLibreOffice, StubEscalationNotifier, StubPersistence — under adapters/stubs/ or adapters/&lt;name&gt;/stub.py.
+    </rule>
+    <rule id="CS-STUB-03">
+      Real implementations: HttpLLMClient, HttpEmbeddingsClient, QdrantVectorStore, HttpDoclingClient,
+      SqlAlchemyPersistence (PostgreSQL), etc.
+    </rule>
+    <rule id="CS-STUB-04">
+      Construction only via factory/DI reading Settings. Application services must not import Stub* or Http* directly.
+    </rule>
+    <rule id="CS-STUB-05">
+      USE_STUBS=true forces all stubs. Per-service *_USE_STUB overrides when global is false.
+    </rule>
+  </section>
+
+  <section id="errors" title="Error handling">
+    <rule id="CS-ERR-01">
+      Map adapter failures to domain/application errors; do not leak raw upstream bodies with secrets.
+    </rule>
+    <rule id="CS-ERR-02">
+      Timeouts from env (*_TIMEOUT_S) must be enforced on httpx clients.
+    </rule>
+    <rule id="CS-ERR-03">
+      Escalation path on grounding failure is a business outcome (200/201 with escalation message), not a 500.
+    </rule>
+  </section>
+
+  <section id="domain" title="Domain purity">
+    <rule id="CS-DOM-01">
+      domain/ has no FastAPI, httpx, or qdrant imports.
+    </rule>
+    <rule id="CS-DOM-02">
+      Grounding and dialogue policies live in application/ (or domain services) — not in routers.
+    </rule>
+  </section>
+
+  <section id="persistence" title="PostgreSQL persistence">
+    <rule id="CS-DB-01">
+      PostgreSQL is the system of record for appeals, messages, escalations, audit, and stats inputs.
+      Data must survive process restarts when PERSISTENCE_USE_STUB=false.
+    </rule>
+    <rule id="CS-DB-02">
+      Real adapter: SQLAlchemy 2.x async + asyncpg. Migrations via Alembic. Connection string: DATABASE_URL.
+    </rule>
+    <rule id="CS-DB-03">
+      StubPersistence (in-memory) for unit tests. Naming: StubPersistence vs SqlAlchemyPersistence (or PostgresPersistence).
+    </rule>
+    <rule id="CS-DB-04">
+      Application services depend on the Persistence port only — never import sqlalchemy in routers or LangGraph node modules directly.
+    </rule>
+    <rule id="CS-DB-05">
+      Keep CLIENT_INFO.md response shapes aligned when changing persisted API fields.
+    </rule>
+  </section>
+
+</coding_standards>

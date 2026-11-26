@@ -1,0 +1,284 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Semantic graph of the Corporate RAG AI-Agent server.
+  Nodes = modules; edges = directed dependencies / control flow.
+  For LLM agents: use this to navigate where to change behavior.
+-->
+<semantic_graph project="ai-agent-corp-docs" scope="server">
+
+  <legend>
+    <edge_type name="calls" description="Synchronous/async invocation"/>
+    <edge_type name="depends_on" description="Compile/runtime dependency"/>
+    <edge_type name="implements" description="Adapter implements a port"/>
+    <edge_type name="configures" description="Settings select implementation"/>
+    <edge_type name="observes" description="Logging/audit of events"/>
+    <edge_type name="persists" description="Writes durable state"/>
+    <edge_type name="reads" description="Reads durable state"/>
+  </legend>
+
+  <!-- ========== NODES ========== -->
+
+  <nodes>
+
+    <node id="config" layer="cross-cutting">
+      <name>config</name>
+      <path>server/app/config/</path>
+      <responsibility>Load env (pydantic-settings); USE_STUBS and per-adapter flags; expose Settings</responsibility>
+    </node>
+
+    <node id="logging" layer="cross-cutting">
+      <name>logging</name>
+      <path>server/app/logging/</path>
+      <responsibility>Structured request logs; correlation IDs; redaction; appeal audit event helpers</responsibility>
+    </node>
+
+    <node id="api" layer="api">
+      <name>api</name>
+      <path>server/app/api/</path>
+      <responsibility>FastAPI routers: appeals, messages, officer-reply, stats; DTO validation</responsibility>
+      <endpoints>
+        <endpoint method="GET" path="/api/v1/appeals"/>
+        <endpoint method="GET" path="/api/v1/appeals/{id}"/>
+        <endpoint method="POST" path="/api/v1/appeals"/>
+        <endpoint method="POST" path="/api/v1/appeals/{id}/messages"/>
+        <endpoint method="GET" path="/api/v1/appeals/{id}/messages"/>
+        <endpoint method="POST" path="/api/v1/appeals/{id}/officer-reply"/>
+        <endpoint method="GET" path="/api/v1/stats"/>
+      </endpoints>
+    </node>
+
+    <node id="appeals" layer="application">
+      <name>appeals</name>
+      <path>server/app/application/appeals/</path>
+      <responsibility>Appeal lifecycle: create, list, get, status transitions</responsibility>
+    </node>
+
+    <node id="dialogue" layer="application">
+      <name>dialogue</name>
+      <path>server/app/application/dialogue/</path>
+      <responsibility>
+        LangGraph StateGraph: assess specificity → clarify loop | retrieve → ground → answer | escalate.
+        Maintain clarifying turn state until unambiguous or explicit inability.
+        Nodes call application ports (LLM, retrieval, grounding, escalation) — not LangChain RAG chains.
+      </responsibility>
+      <tech>langgraph</tech>
+      <success_criterion ref="2"/>
+    </node>
+
+    <node id="langgraph_runtime" layer="application">
+      <name>langgraph_runtime</name>
+      <path>server/app/application/dialogue/graph.py</path>
+      <responsibility>
+        Compile StateGraph; optional checkpointing keyed by appeal_id; same graph for stubs and live adapters.
+      </responsibility>
+      <tech>langgraph</tech>
+    </node>
+
+    <node id="grounding" layer="application">
+      <name>grounding</name>
+      <path>server/app/application/grounding/</path>
+      <responsibility>
+        Verify assistant claims are supported by retrieved chunks only.
+        Refuse invention; require citations for answers.
+      </responsibility>
+      <success_criterion ref="1"/>
+    </node>
+
+    <node id="retrieval" layer="application">
+      <name>retrieval</name>
+      <path>server/app/application/retrieval/</path>
+      <responsibility>Hybrid dense+sparse search, RRF fusion, optional rerank, prefer-latest</responsibility>
+    </node>
+
+    <node id="ingest" layer="application">
+      <name>ingest</name>
+      <path>server/app/application/ingest/</path>
+      <responsibility>docx corpus → convert → chunk → embed → upsert Qdrant; blue/green alias swap</responsibility>
+    </node>
+
+    <node id="learning" layer="application">
+      <name>learning</name>
+      <path>server/app/application/learning/</path>
+      <responsibility>
+        Officer canonical answer → persist → trigger ingest/index update → audit.
+      </responsibility>
+      <success_criterion ref="3"/>
+    </node>
+
+    <node id="quality_escalation" layer="application">
+      <name>quality_escalation</name>
+      <path>server/app/application/quality_escalation/</path>
+      <responsibility>
+        Create quality ticket; notify QUALITY_SERVICE_EMAIL; user-facing refuse/escalate message.
+      </responsibility>
+      <success_criterion ref="1"/>
+      <success_criterion ref="3"/>
+    </node>
+
+    <node id="persistence" layer="adapters">
+      <name>persistence</name>
+      <path>server/app/adapters/persistence/</path>
+      <responsibility>
+        System of record for appeals, message history, escalations, document metadata, audit events, stats inputs.
+        Survives process restarts. Port: Persistence / repositories.
+      </responsibility>
+      <tech>postgresql sqlalchemy2 asyncpg alembic</tech>
+    </node>
+
+    <node id="persistence_postgres" layer="adapters">
+      <name>SqlAlchemyPersistence</name>
+      <path>server/app/adapters/persistence/sqlalchemy/</path>
+      <responsibility>Real PostgreSQL adapter (async engine, sessions, migrations)</responsibility>
+    </node>
+
+    <node id="persistence_stub" layer="adapters">
+      <name>StubPersistence</name>
+      <path>server/app/adapters/stubs/ or persistence/stub.py</path>
+      <responsibility>In-memory persistence for unit tests; not durable across restarts</responsibility>
+    </node>
+
+    <node id="adapter_llm" layer="adapters">
+      <name>adapters.llm</name>
+      <path>server/app/adapters/llm/</path>
+      <responsibility>OpenAI-compatible chat completions port</responsibility>
+    </node>
+
+    <node id="adapter_embeddings" layer="adapters">
+      <name>adapters.embeddings</name>
+      <path>server/app/adapters/embeddings/</path>
+      <responsibility>Dense + sparse /embeddings port (bge-m3)</responsibility>
+    </node>
+
+    <node id="adapter_qdrant" layer="adapters">
+      <name>adapters.qdrant</name>
+      <path>server/app/adapters/vectorstore/</path>
+      <responsibility>Qdrant upsert/search; collection alias; timeouts; batch upsert</responsibility>
+    </node>
+
+    <node id="adapter_docling" layer="adapters">
+      <name>adapters.docling</name>
+      <path>server/app/adapters/docling/</path>
+      <responsibility>Document conversion and HybridChunker settings</responsibility>
+    </node>
+
+    <node id="adapter_libreoffice" layer="adapters">
+      <name>adapters.libreoffice</name>
+      <path>server/app/adapters/libreoffice/</path>
+      <responsibility>soffice docx conversion when Docling needs intermediate formats</responsibility>
+    </node>
+
+    <node id="adapter_escalation_email" layer="adapters">
+      <name>adapters.escalation</name>
+      <path>server/app/adapters/escalation/</path>
+      <responsibility>Email/queue notification to quality service</responsibility>
+    </node>
+
+    <node id="stubs" layer="adapters">
+      <name>stubs</name>
+      <path>server/app/adapters/stubs/</path>
+      <responsibility>
+        Deterministic StubLLM, StubEmbeddings, StubVectorStore, StubDocling,
+        StubLibreOffice, StubEscalation — default for local/CI.
+      </responsibility>
+    </node>
+
+  </nodes>
+
+  <!-- ========== EDGES ========== -->
+
+  <edges>
+
+    <!-- API orchestration -->
+    <edge from="api" to="appeals" type="calls"/>
+    <edge from="api" to="dialogue" type="calls" when="POST messages"/>
+    <edge from="api" to="learning" type="calls" when="POST officer-reply"/>
+    <edge from="api" to="persistence" type="reads" when="GET stats / list"/>
+
+    <!-- Dialogue / LangGraph core loop -->
+    <edge from="dialogue" to="langgraph_runtime" type="depends_on"/>
+    <edge from="langgraph_runtime" to="retrieval" type="calls" when="node retrieve"/>
+    <edge from="langgraph_runtime" to="grounding" type="calls" when="node ground"/>
+    <edge from="langgraph_runtime" to="quality_escalation" type="calls" when="node escalate"/>
+    <edge from="langgraph_runtime" to="adapter_llm" type="calls" when="clarify phrasing or answer draft"/>
+    <edge from="dialogue" to="retrieval" type="calls" when="question sufficiently specified"/>
+    <edge from="dialogue" to="grounding" type="calls" when="candidates available"/>
+    <edge from="dialogue" to="quality_escalation" type="calls" when="unsupported or out-of-KB"/>
+    <edge from="dialogue" to="adapter_llm" type="calls" when="clarify phrasing or answer draft"/>
+    <edge from="dialogue" to="persistence" type="persists" when="append messages / status"/>
+    <edge from="dialogue" to="appeals" type="calls" when="status clarifying|answered|escalated"/>
+    <edge from="langgraph_runtime" to="persistence" type="persists" when="optional checkpoint by appeal_id"/>
+
+    <!-- Grounding -->
+    <edge from="grounding" to="adapter_llm" type="calls" optional="true" when="assist draft; never as sole source of truth"/>
+    <edge from="grounding" to="quality_escalation" type="calls" when="claims not supported by chunks"/>
+
+    <!-- Retrieval -->
+    <edge from="retrieval" to="adapter_embeddings" type="calls"/>
+    <edge from="retrieval" to="adapter_qdrant" type="calls"/>
+    <edge from="retrieval" to="adapter_llm" type="calls" when="RERANK_MODE=llm"/>
+
+    <!-- Ingest -->
+    <edge from="ingest" to="adapter_libreoffice" type="calls" optional="true"/>
+    <edge from="ingest" to="adapter_docling" type="calls"/>
+    <edge from="ingest" to="adapter_embeddings" type="calls"/>
+    <edge from="ingest" to="adapter_qdrant" type="calls"/>
+    <edge from="ingest" to="persistence" type="persists" when="document/chunk metadata"/>
+
+    <!-- Learning -->
+    <edge from="learning" to="persistence" type="persists"/>
+    <edge from="learning" to="ingest" type="calls" when="update KB from canonical answer"/>
+    <edge from="learning" to="appeals" type="calls" when="resolve appeal after officer"/>
+
+    <!-- Escalation -->
+    <edge from="quality_escalation" to="adapter_escalation_email" type="calls"/>
+    <edge from="quality_escalation" to="persistence" type="persists"/>
+    <edge from="quality_escalation" to="appeals" type="calls"/>
+
+    <!-- Appeals -->
+    <edge from="appeals" to="persistence" type="persists"/>
+    <edge from="appeals" to="persistence" type="reads"/>
+
+    <!-- Stub wiring -->
+    <edge from="stubs" to="adapter_llm" type="implements"/>
+    <edge from="stubs" to="adapter_embeddings" type="implements"/>
+    <edge from="stubs" to="adapter_qdrant" type="implements"/>
+    <edge from="stubs" to="adapter_docling" type="implements"/>
+    <edge from="stubs" to="adapter_libreoffice" type="implements"/>
+    <edge from="stubs" to="adapter_escalation_email" type="implements"/>
+    <edge from="stubs" to="persistence" type="implements" when="StubPersistence"/>
+    <edge from="persistence_stub" to="persistence" type="implements"/>
+    <edge from="persistence_postgres" to="persistence" type="implements"/>
+    <edge from="config" to="stubs" type="configures" when="USE_STUBS or *_USE_STUB"/>
+    <edge from="config" to="adapter_llm" type="configures"/>
+    <edge from="config" to="adapter_embeddings" type="configures"/>
+    <edge from="config" to="adapter_qdrant" type="configures"/>
+    <edge from="config" to="adapter_docling" type="configures"/>
+    <edge from="config" to="adapter_libreoffice" type="configures"/>
+    <edge from="config" to="adapter_escalation_email" type="configures"/>
+    <edge from="config" to="persistence" type="configures" when="DATABASE_URL / PERSISTENCE_USE_STUB"/>
+
+    <!-- Observability -->
+    <edge from="logging" to="api" type="observes"/>
+    <edge from="logging" to="dialogue" type="observes"/>
+    <edge from="logging" to="quality_escalation" type="observes"/>
+    <edge from="logging" to="learning" type="observes"/>
+    <edge from="logging" to="ingest" type="observes"/>
+    <edge from="logging" to="persistence" type="depends_on" when="audit trail durability"/>
+
+  </edges>
+
+  <!-- ========== SUCCESS CRITERIA ANCHORS ========== -->
+
+  <success_criteria>
+    <criterion id="1" name="grounded_only">
+      Path: dialogue → retrieval → grounding; else quality_escalation. Never invent.
+    </criterion>
+    <criterion id="2" name="clarifying_dialogue">
+      Path: LangGraph dialogue loops clarifying messages until unique regulation mapping or escalate.
+    </criterion>
+    <criterion id="3" name="continuous_learning">
+      Path: quality_escalation → officer-reply api → learning → ingest → persistence audit.
+    </criterion>
+  </success_criteria>
+
+</semantic_graph>
