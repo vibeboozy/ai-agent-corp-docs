@@ -1,10 +1,10 @@
 """
 ANCHOR: app.application.dialogue.graph
-PURPOSE: Compile LangGraph StateGraph placeholder; optional checkpoint by appeal_id.
+PURPOSE: Compile LangGraph StateGraph for clarify/retrieve/ground/answer/escalate.
 Dependencies: langgraph; dialogue.nodes; ports via DI
 CRITICAL: Topology is source of truth for clarify/retrieve/ground/answer/escalate (ANC-LG-01).
 DO:
-- Compile graph with stub no-op wiring later
+- Compile graph with stub-compatible node wiring
 - Keep offline-runnable with stubs
 DONT:
 - Add LangChain RetrievalQA path that skips grounding (ANC-LG-02)
@@ -12,24 +12,72 @@ DONT:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
+from langgraph.graph import END, START, StateGraph
+
+from app.application.dialogue.nodes import DialogueDeps, make_nodes
 from app.application.dialogue.state import DialogueState
 
 
-def build_dialogue_graph(*_args: Any, **_kwargs: Any) -> Any:
-    """
-    Placeholder for StateGraph compilation.
+def _route_after_assess(
+    state: DialogueState,
+) -> Literal["clarify", "retrieve"]:
+    specificity = state.get("specificity") or "underspecified"
+    if specificity in ("underspecified", "ambiguous"):
+        return "clarify"
+    return "retrieve"
 
-    Later phases: define nodes/edges with langgraph; inject ports via closures/DI.
-    Skeleton intentionally does not import langgraph at module import time until
-    dependencies are installed and nodes are implemented.
-    """
-    raise NotImplementedError(
-        "Dialogue StateGraph not implemented — see project_context.md §2.1 / phase 3"
+
+def _route_after_clarify(
+    state: DialogueState,
+) -> Literal["escalate", "__end__"]:
+    if state.get("outcome") == "escalate":
+        return "escalate"
+    return "__end__"
+
+
+def _route_after_ground(
+    state: DialogueState,
+) -> Literal["answer", "escalate"]:
+    if state.get("grounded"):
+        return "answer"
+    return "escalate"
+
+
+def build_dialogue_graph(deps: DialogueDeps) -> Any:
+    """Compile the dialogue StateGraph with DI-bound nodes."""
+    nodes = make_nodes(deps)
+    graph: StateGraph = StateGraph(DialogueState)
+    graph.add_node("assess_specificity", nodes["assess_specificity"])
+    graph.add_node("clarify", nodes["clarify"])
+    graph.add_node("retrieve", nodes["retrieve"])
+    graph.add_node("ground", nodes["ground"])
+    graph.add_node("answer", nodes["answer"])
+    graph.add_node("escalate", nodes["escalate"])
+
+    graph.add_edge(START, "assess_specificity")
+    graph.add_conditional_edges(
+        "assess_specificity",
+        _route_after_assess,
+        {"clarify": "clarify", "retrieve": "retrieve"},
     )
+    graph.add_conditional_edges(
+        "clarify",
+        _route_after_clarify,
+        {"escalate": "escalate", "__end__": END},
+    )
+    graph.add_edge("retrieve", "ground")
+    graph.add_conditional_edges(
+        "ground",
+        _route_after_ground,
+        {"answer": "answer", "escalate": "escalate"},
+    )
+    graph.add_edge("answer", END)
+    graph.add_edge("escalate", END)
+    return graph.compile()
 
 
 def compile_placeholder_graph() -> dict[str, type]:
-    """Return a minimal descriptor so tests can assert graph module shape."""
+    """Backward-compatible descriptor for skeleton tests."""
     return {"state": DialogueState}

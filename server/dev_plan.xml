@@ -103,7 +103,7 @@
 
   <phase id="5" name="ingest_from_docs">
     <goals>
-      <goal>Ingest pipeline from server/docs/*.docx through Docling/LibreOffice → chunk → embed → Qdrant.</goal>
+      <goal>Ingest pipeline from local corpus ($DOCS_CORPUS_PATH / $DOCS_DIR, default server/docs/*.docx, gitignored) through Docling/LibreOffice → chunk → embed → Qdrant.</goal>
       <goal>Blue/green collections and QDRANT_COLLECTION alias.</goal>
       <goal>Document/chunk metadata in persistence.</goal>
     </goals>

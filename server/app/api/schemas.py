@@ -1,10 +1,10 @@
 """
 ANCHOR: app.api.schemas
-PURPOSE: Pydantic v2 request/response DTOs aligned with CLIENT_INFO.md (skeleton shapes).
+PURPOSE: Pydantic v2 request/response DTOs aligned with CLIENT_INFO.md.
 Dependencies: domain enums/models (conceptually); no FastAPI imports beyond typing
 DO:
 - Keep shapes in sync with CLIENT_INFO.md
-- Return citations on message_kind=answer (later)
+- Return citations on message_kind=answer
 DONT:
 - Embed business logic in DTOs
 """
@@ -68,10 +68,20 @@ class Message(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
 
 
+class FirstMessage(BaseModel):
+    content: str
+
+
 class CreateAppealRequest(BaseModel):
     user_id: str | None = None
     user_label: str | None = None
-    content: str | None = None
+    topic: str | None = None
+    message: FirstMessage | None = None
+
+
+class CreateAppealResponse(BaseModel):
+    appeal: Appeal
+    messages: list[Message] = Field(default_factory=list)
 
 
 class CreateMessageRequest(BaseModel):
@@ -79,8 +89,38 @@ class CreateMessageRequest(BaseModel):
     role: MessageRole = "user"
 
 
+class CreateMessageResponse(BaseModel):
+    appeal: Appeal
+    messages: list[Message]
+
+
 class OfficerReplyRequest(BaseModel):
     content: str
+    source_document_hint: str | None = None
+
+
+class LearningInfo(BaseModel):
+    accepted: bool
+    ingest_job_id: str | None = None
+    escalation_id: UUID | None = None
+
+
+class OfficerReplyResponse(BaseModel):
+    appeal: Appeal
+    message: Message
+    learning: LearningInfo
+
+
+class AppealListResponse(BaseModel):
+    items: list[Appeal]
+    total: int
+    limit: int
+    offset: int
+
+
+class MessageListResponse(BaseModel):
+    appeal_id: UUID
+    items: list[Message]
 
 
 class ErrorBody(BaseModel):
@@ -88,10 +128,19 @@ class ErrorBody(BaseModel):
     code: str
 
 
-class StatsResponse(BaseModel):
-    """Aggregate stats placeholder — populated in later phases from persistence."""
+class StatsWindow(BaseModel):
+    from_: str | None = Field(default=None, alias="from")
+    to: str | None = None
 
-    total_appeals: int = 0
-    answered: int = 0
-    escalated: int = 0
-    clarifying: int = 0
+    model_config = {"populate_by_name": True}
+
+
+class StatsResponse(BaseModel):
+    appeals_total: int = 0
+    by_status: dict[str, int] = Field(default_factory=dict)
+    messages_total: int = 0
+    clarify_rate: float = 0.0
+    escalation_rate: float = 0.0
+    answered_rate: float = 0.0
+    learning_updates: int = 0
+    window: StatsWindow = Field(default_factory=StatsWindow)

@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.llm.HttpLLMClient
-PURPOSE: Real HttpLLMClient adapter skeleton — NotImplemented until live-adapter phase.
+PURPOSE: Real HttpLLMClient — OpenAI-compatible chat completions behind flags.
 Dependencies: httpx; Settings
 CRITICAL: Selected only when USE_STUBS=false and matching *_USE_STUB=false.
 DO:
@@ -13,19 +13,111 @@ DONT:
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlparse
+
+import httpx
 
 from app.adapters.llm.port import LLMClient
+from app.domain.errors import AppError, UpstreamTimeoutError
 
 
 class HttpLLMClient:
-    """Real provider skeleton."""
+    """OpenAI-compatible chat client."""
 
-    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
-        pass
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        api_key: str | None,
+        model: str,
+        timeout_s: float = 180.0,
+        temperature: float = 0.2,
+        max_tokens: int = 1500,
+        allow_hosts: set[str] | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._model = model
+        self._timeout = timeout_s
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._allow_hosts = allow_hosts or set()
+        self._assert_host_allowed()
 
-    async def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("HttpLLMClient not implemented")
+    def _assert_host_allowed(self) -> None:
+        if not self._allow_hosts:
+            return
+        host = (urlparse(self._base_url).hostname or "").lower()
+        if host and host not in self._allow_hosts:
+            raise AppError(f"LLM host not allowlisted: {host}", code="EGRESS_DENIED")
+
+    async def ping(self) -> bool:
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        try:
+            async with httpx.AsyncClient(timeout=min(self._timeout, 15.0)) as client:
+                resp = await client.get(f"{self._base_url}/models", headers=headers)
+                if resp.status_code < 500:
+                    return True
+                return False
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeoutError("LLM ping timed out") from exc
+        except httpx.HTTPError as exc:
+            raise AppError("LLM ping failed", code="UPSTREAM_ERROR") from exc
+
+    async def complete(
+        self,
+        *,
+        system: str,
+        user: str,
+        temperature: float | None = None,
+    ) -> str:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        payload = {
+            "model": self._model,
+            "temperature": self._temperature if temperature is None else temperature,
+            "max_tokens": self._max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(
+                    f"{self._base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return str(data["choices"][0]["message"]["content"])
+        except httpx.TimeoutException as exc:
+            raise UpstreamTimeoutError("LLM request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise AppError("LLM upstream error", code="UPSTREAM_ERROR") from exc
+
+    async def classify_specificity(
+        self, user_message: str, history: list[str] | None = None
+    ) -> str:
+        hist = "\n".join(history or [])
+        prompt = (
+            "Classify the user question as one of: underspecified, ambiguous, specific. "
+            "Reply with only that single token.\n"
+            f"History:\n{hist}\nQuestion:\n{user_message}"
+        )
+        raw = (await self.complete(system="Classifier", user=prompt, temperature=0.0)).strip().lower()
+        for label in ("underspecified", "ambiguous", "specific"):
+            if label in raw:
+                return label
+        return "specific"
 
 
-# Structural compatibility with LLMClient
-_: LLMClient = HttpLLMClient()  # type: ignore[assignment]
+_: LLMClient = HttpLLMClient(  # type: ignore[assignment]
+    base_url="https://example.invalid/v1",
+    api_key=None,
+    model="stub",
+)

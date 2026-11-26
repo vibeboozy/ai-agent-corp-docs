@@ -15,12 +15,15 @@ from __future__ import annotations
 from app.adapters.stubs.docling import StubDoclingClient
 from app.adapters.stubs.embeddings import StubEmbeddingsClient
 from app.adapters.stubs.escalation import StubEscalationNotifier
+from app.adapters.stubs.fixtures import SHARED_FIXTURE_KB, FixtureKB
 from app.adapters.stubs.libreoffice import StubLibreOffice
 from app.adapters.stubs.llm import StubLLMClient
 from app.adapters.stubs.persistence import StubPersistence
 from app.adapters.stubs.vectorstore import StubVectorStore
 
 __all__ = [
+    "SHARED_FIXTURE_KB",
+    "FixtureKB",
     "StubDoclingClient",
     "StubEmbeddingsClient",
     "StubEscalationNotifier",
