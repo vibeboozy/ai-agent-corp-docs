@@ -112,9 +112,22 @@ class Settings(BaseSettings):
     # --- retrieval / dialogue / grounding ---
     retrieval_prefetch: int = Field(default=50, alias="RETRIEVAL_PREFETCH")
     retrieval_prefer_latest: bool = Field(default=True, alias="RETRIEVAL_PREFER_LATEST")
+    retrieval_lexical_weight: float = Field(default=0.35, alias="RETRIEVAL_LEXICAL_WEIGHT")
     dialogue_max_clarify_turns: int = Field(default=3, alias="DIALOGUE_MAX_CLARIFY_TURNS")
     grounding_min_citations: int = Field(default=1, alias="GROUNDING_MIN_CITATIONS")
     grounding_min_score: float = Field(default=0.0, alias="GROUNDING_MIN_SCORE")
+
+    # --- abbreviation glossary (query expand + optional ingest metadata) ---
+    # Empty ABBREVIATION_GLOSSARY / PATH → built-in corporate default list.
+    abbreviation_glossary: str | None = Field(default=None, alias="ABBREVIATION_GLOSSARY")
+    abbreviation_glossary_path: str | None = Field(
+        default=None, alias="ABBREVIATION_GLOSSARY_PATH"
+    )
+    abbreviation_use_defaults: bool = Field(default=True, alias="ABBREVIATION_USE_DEFAULTS")
+    abbreviation_expand_query: bool = Field(default=True, alias="ABBREVIATION_EXPAND_QUERY")
+    abbreviation_enrich_ingest: bool = Field(
+        default=True, alias="ABBREVIATION_ENRICH_INGEST"
+    )
 
     # --- quality ---
     quality_service_email: str = Field(

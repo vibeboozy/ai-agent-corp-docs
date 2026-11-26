@@ -29,9 +29,9 @@ _THINK_RE = re.compile(
     r"<think>.*$|<thinking>.*$",
     re.IGNORECASE | re.DOTALL,
 )
-_LABELS = ("underspecified", "ambiguous", "specific")
+_LABELS = ("underspecified", "ambiguous", "specific", "off_topic")
 # When several labels appear in leftover prose, prefer answering over clarifying.
-_LABEL_PREFERENCE = ("specific", "ambiguous", "underspecified")
+_LABEL_PREFERENCE = ("specific", "ambiguous", "underspecified", "off_topic")
 
 
 def strip_think_blocks(text: str) -> str:
@@ -41,7 +41,7 @@ def strip_think_blocks(text: str) -> str:
 
 def parse_specificity_label(raw: str) -> str:
     """
-    Map classifier output to underspecified|ambiguous|specific.
+    Map classifier output to underspecified|ambiguous|specific|off_topic.
 
     Strips <think> blocks first so reasoning that mentions 'underspecified'
     cannot override the final token (API clarifying vs direct-answer bug).
@@ -49,7 +49,7 @@ def parse_specificity_label(raw: str) -> str:
     If multiple labels remain in cleaned text, prefer the *last* mention
     (models often reason then conclude); ties broken toward `specific`.
     """
-    cleaned = strip_think_blocks(raw).lower()
+    cleaned = strip_think_blocks(raw).lower().replace("-", "_")
     lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
     # Bare single-line label (e.g. "specific" / "Underspecified.").
     if len(lines) == 1:
@@ -158,8 +158,12 @@ class HttpLLMClient:
     ) -> str:
         hist = "\n".join(history or [])
         prompt = (
-            "Classify the user question as one of: underspecified, ambiguous, specific.\n"
+            "Classify the user question as one of: "
+            "underspecified, ambiguous, specific, off_topic.\n"
             "Rules:\n"
+            "- off_topic: chitchat or non-regulation asks "
+            "(e.g. сколько времени, какая погода, расскажи анекдот). "
+            "Only for questions outside corporate regulations/processes.\n"
             "- specific: asks who/what for a concrete role+topic "
             "(e.g. кто отвечает за организацию отчётности по проекту, "
             "кто подписывает договоры на закупку). Prefer specific when both "

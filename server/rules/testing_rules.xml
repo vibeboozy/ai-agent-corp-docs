@@ -16,8 +16,7 @@
     <rule id="TEST-GEN-03">
       Markers: unit (default), contract, behavior, integration, e2e, demo.
       Live suites use @pytest.mark.integration and/or @pytest.mark.e2e and skip
-      unless the required services answer ping via normal Settings config
-      (no RUN_LIVE_* env flags).
+      unless the required services answer ping via normal Settings config.
     </rule>
     <rule id="TEST-GEN-04">
       Prefer deterministic mocked HTTP / MagicMock ports for unit tests; no wall-clock flakiness.
@@ -78,10 +77,10 @@
     </rule>
   </section>
 
-  <section id="live_readiness" title="Live test readiness (no env flags)">
+  <section id="live_readiness" title="Live test readiness">
     <rule id="TEST-LIVE-01">
-      Do not use RUN_LIVE_* skip-by-env. Live tests either run when services are reachable
-      via Settings, or are plain unit tests with mocks.
+      Live tests either run when services are reachable via Settings, or are plain
+      unit tests with mocks. Do not gate suites on skip-by-env flags.
     </rule>
     <rule id="TEST-LIVE-02">
       Per-service smoke: skip unless llm / embeddings / qdrant / docling / postgres ping succeeds.

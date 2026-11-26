@@ -76,8 +76,7 @@ def services_available(*names: str) -> bool:
     """
     True when every named dependency answers ping via normal Settings config.
 
-    Live/integration tests use this instead of RUN_LIVE_* env flags: they run
-    when infra is up, and skip cleanly when it is not.
+    Live/integration tests run when infra is up, and skip cleanly when it is not.
     """
     if not names:
         return False

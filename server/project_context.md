@@ -291,7 +291,8 @@ Documented in `.env.example` (this directory). Groups:
 - **Rerank / Retrieval** — `RERANK_MODE=none|llm`, candidates, top_k, max_per_doc, min_score; prefetch, prefer latest
 - **Quality** — `QUALITY_SERVICE_EMAIL`, escalation toggles
 - **Cache / Log** — operational knobs
-- **Tests** — no `RUN_LIVE_*`; integration/e2e skip unless services answer ping
+- **Abbreviation glossary** — built-in corporate abbr list; `ABBREVIATION_*` for query expand + ingest metadata
+- **Tests** — integration/e2e skip unless services answer ping
 
 **CRITICAL:** Runtime always uses real providers. Configure URLs/keys in `.env`. Unit tests may mock HTTP; product demos need live infra (`rag-server check`).
 

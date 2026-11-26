@@ -17,6 +17,7 @@ from app.adapters.docling.port import DoclingClient
 from app.adapters.embeddings.port import EmbeddingsClient
 from app.adapters.persistence.port import Persistence
 from app.adapters.vectorstore.port import VectorStore
+from app.domain.glossary import AbbreviationGlossary
 
 
 class IngestService:
@@ -27,11 +28,13 @@ class IngestService:
         embeddings: EmbeddingsClient,
         vectorstore: VectorStore,
         persistence: Persistence,
+        glossary: AbbreviationGlossary | None = None,
     ) -> None:
         self._docling = docling
         self._embeddings = embeddings
         self._vectorstore = vectorstore
         self._persistence = persistence
+        self._glossary = glossary
 
     async def ingest_text(
         self,
@@ -54,6 +57,14 @@ class IngestService:
             chunk_id = chunk.get("chunk_id") or f"c-{uuid4().hex[:8]}"
             dense = vectors[idx] if idx < len(vectors) else None
             sparse = sparse_maps[idx] if idx < len(sparse_maps) else None
+            meta = {
+                **(metadata or {}),
+                "ingest_job_id": job_id,
+            }
+            if chunk.get("section_title"):
+                meta["section_title"] = chunk["section_title"]
+            if self._glossary is not None:
+                meta = self._glossary.enrich_metadata(str(chunk["text"]), meta)
             upserts.append(
                 {
                     "document_id": doc_id,
@@ -62,12 +73,10 @@ class IngestService:
                     "document_title": document_title,
                     "keywords": keywords or [],
                     "source": "learned",
+                    "locator": chunk.get("locator") or chunk.get("section_title"),
                     "dense_vector": dense,
                     "sparse_vector": sparse,
-                    "metadata": {
-                        **(metadata or {}),
-                        "ingest_job_id": job_id,
-                    },
+                    "metadata": meta,
                 }
             )
         await self._vectorstore.upsert(upserts)

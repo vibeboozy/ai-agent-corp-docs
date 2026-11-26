@@ -69,8 +69,14 @@ async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
     texts = [c["text"] for c in chunks]
     vectors = await container.embeddings.embed_dense(texts)
     sparse_maps = await container.embeddings.embed_sparse(texts)
+    glossary = getattr(container, "glossary", None)
     upserts = []
     for idx, chunk in enumerate(chunks):
+        meta: dict = {"source_path": str(src)}
+        if chunk.get("section_title"):
+            meta["section_title"] = chunk["section_title"]
+        if glossary is not None:
+            meta = glossary.enrich_metadata(str(chunk["text"]), meta)
         upserts.append(
             {
                 "document_id": f"doc-{src.stem}",
@@ -78,9 +84,10 @@ async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
                 "text": chunk["text"],
                 "document_title": title,
                 "source": "ingest",
+                "locator": chunk.get("locator") or chunk.get("section_title"),
                 "dense_vector": vectors[idx] if idx < len(vectors) else None,
                 "sparse_vector": sparse_maps[idx] if idx < len(sparse_maps) else None,
-                "metadata": {"source_path": str(src)},
+                "metadata": meta,
             }
         )
     await container.vectorstore.upsert(upserts)

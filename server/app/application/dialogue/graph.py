@@ -1,11 +1,11 @@
 """
 ANCHOR: app.application.dialogue.graph
-PURPOSE: Compile LangGraph StateGraph for clarify/retrieve/ground/answer/escalate.
+PURPOSE: Compile LangGraph StateGraph for refuse/clarify/retrieve/ground/answer/escalate.
 Dependencies: langgraph; dialogue.nodes; ports via DI
 CRITICAL: Topology is source of truth for clarify/retrieve/ground/answer/escalate (ANC-LG-01).
 DO:
 - Compile graph with DI-injected node wiring
-- Retrieve before clarify so timid classify cannot skip KB hits
+- Refuse off-topic before retrieve; retrieve before clarify so timid classify cannot skip KB
 - Keep topology independent of concrete adapters
 DONT:
 - Add LangChain RetrievalQA path that skips grounding (ANC-LG-02)
@@ -22,11 +22,19 @@ from app.application.dialogue.specificity import looks_role_topic_specific
 from app.application.dialogue.state import DialogueState
 
 
+def _route_after_assess(
+    state: DialogueState,
+) -> Literal["refuse", "retrieve"]:
+    if (state.get("specificity") or "") == "off_topic":
+        return "refuse"
+    return "retrieve"
+
+
 def _route_after_retrieve(
     state: DialogueState,
 ) -> Literal["clarify", "ground"]:
     """
-    Retrieve always runs after assess. Then:
+    Retrieve always runs after assess (unless off-topic). Then:
 
     - specific (incl. prefer_specific_label override) OR role+topic heuristic → ground
     - underspecified|ambiguous without role+topic → clarify
@@ -63,15 +71,20 @@ def build_dialogue_graph(deps: DialogueDeps) -> Any:
     nodes = make_nodes(deps)
     graph: StateGraph = StateGraph(DialogueState)
     graph.add_node("assess_specificity", nodes["assess_specificity"])
+    graph.add_node("refuse", nodes["refuse"])
     graph.add_node("clarify", nodes["clarify"])
     graph.add_node("retrieve", nodes["retrieve"])
     graph.add_node("ground", nodes["ground"])
     graph.add_node("answer", nodes["answer"])
     graph.add_node("escalate", nodes["escalate"])
 
-    # Retrieve-before-clarify: timid classify can no longer skip KB.
     graph.add_edge(START, "assess_specificity")
-    graph.add_edge("assess_specificity", "retrieve")
+    graph.add_conditional_edges(
+        "assess_specificity",
+        _route_after_assess,
+        {"refuse": "refuse", "retrieve": "retrieve"},
+    )
+    graph.add_edge("refuse", END)
     graph.add_conditional_edges(
         "retrieve",
         _route_after_retrieve,

@@ -16,6 +16,7 @@ from uuid import UUID
 
 from app.adapters.persistence.port import Persistence
 from app.application.ingest.service import IngestService
+from app.application.text_util import truncate_at_sentence
 from app.domain.enums import AppealStatus, EscalationStatus, MessageKind, MessageRole
 from app.domain.errors import ConflictError, NotFoundError
 from app.domain.models import Appeal, Message
@@ -80,7 +81,7 @@ class LearningService:
         updated = await self._persistence.update_appeal(
             appeal_id,
             status=AppealStatus.RESOLVED_BY_OFFICER,
-            summary=(content[:240] if content else None),
+            summary=(truncate_at_sentence(content, 480) if content else None),
         )
         await self._persistence.increment_learning_updates()
         await self._persistence.add_audit_event(
