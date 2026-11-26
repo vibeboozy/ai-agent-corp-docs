@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.docling.HttpDoclingClient
-PURPOSE: HTTP Docling convert client behind DOCLING_USE_STUB=false.
+PURPOSE: HTTP Docling convert client (live).
 Dependencies: httpx
 CRITICAL: Docling Serve ≥1.x uses POST /v1/convert/source with sources[].
 DO:

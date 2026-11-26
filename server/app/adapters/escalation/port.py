@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.escalation.port
-PURPOSE: EscalationNotifier Protocol/ABC — no Stub prefix (CS-STUB-01).
+PURPOSE: EscalationNotifier Protocol/ABC for quality alerts.
 Dependencies: typing.Protocol
 """
 

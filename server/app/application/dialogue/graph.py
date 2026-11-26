@@ -4,8 +4,8 @@ PURPOSE: Compile LangGraph StateGraph for clarify/retrieve/ground/answer/escalat
 Dependencies: langgraph; dialogue.nodes; ports via DI
 CRITICAL: Topology is source of truth for clarify/retrieve/ground/answer/escalate (ANC-LG-01).
 DO:
-- Compile graph with stub-compatible node wiring
-- Keep offline-runnable with stubs
+- Compile graph with DI-injected node wiring
+- Keep topology independent of concrete adapters
 DONT:
 - Add LangChain RetrievalQA path that skips grounding (ANC-LG-02)
 """

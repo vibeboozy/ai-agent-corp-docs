@@ -1,12 +1,12 @@
 """
 ANCHOR: app.config.settings
-PURPOSE: Load env into Settings; stub flags and connection placeholders.
+PURPOSE: Load env into Settings; connection endpoints for real adapters.
 Dependencies: pydantic_settings; .env.example keys
 DO:
-- Default stubs on
+- Require real provider env for runtime (LLM/embeddings/Qdrant/Docling/Postgres)
 - Document keys in .env.example
 DONT:
-- Require live secrets to import Settings
+- Provide USE_STUBS / *_USE_STUB switches (stubs removed)
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Application settings — mirrors server/.env.example (stubs on by default)."""
+    """Application settings — mirrors server/.env.example (real clients only)."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -26,16 +26,6 @@ class Settings(BaseSettings):
         extra="ignore",
         populate_by_name=True,
     )
-
-    # --- stubs ---
-    use_stubs: bool = Field(default=True, alias="USE_STUBS")
-    llm_use_stub: bool = Field(default=True, alias="LLM_USE_STUB")
-    embeddings_use_stub: bool = Field(default=True, alias="EMBEDDINGS_USE_STUB")
-    qdrant_use_stub: bool = Field(default=True, alias="QDRANT_USE_STUB")
-    docling_use_stub: bool = Field(default=True, alias="DOCLING_USE_STUB")
-    libreoffice_use_stub: bool = Field(default=True, alias="LIBREOFFICE_USE_STUB")
-    escalation_use_stub: bool = Field(default=True, alias="ESCALATION_USE_STUB")
-    persistence_use_stub: bool = Field(default=True, alias="PERSISTENCE_USE_STUB")
 
     # --- app ---
     app_env: str = Field(default="development", alias="APP_ENV")
@@ -46,12 +36,12 @@ class Settings(BaseSettings):
     auth_officer_token: str | None = Field(default=None, alias="AUTH_OFFICER_TOKEN")
 
     # --- docs corpus (local-only; not committed) ---
-    # Prefer DOCS_CORPUS_PATH; DOCS_DIR accepted as alias via model validator below.
+    # Prefer DOCS_CORPUS_PATH; DOCS_DIR accepted as alias via resolved_docs_corpus_path.
     docs_corpus_path: str = Field(default="docs", alias="DOCS_CORPUS_PATH")
     docs_dir: str | None = Field(default=None, alias="DOCS_DIR")
 
     # --- persistence ---
-    database_url: str | None = Field(
+    database_url: str = Field(
         default="postgresql+asyncpg://rag:rag@127.0.0.1:5432/rag_agent",
         alias="DATABASE_URL",
     )
@@ -123,22 +113,6 @@ class Settings(BaseSettings):
     # --- egress ---
     egress_allow_hosts: str | None = Field(default=None, alias="EGRESS_ALLOW_HOSTS")
 
-    def stub_for(self, service: str) -> bool:
-        """Resolve whether a named adapter should use its stub."""
-        if self.use_stubs:
-            return True
-        mapping = {
-            "llm": self.llm_use_stub,
-            "embeddings": self.embeddings_use_stub,
-            "qdrant": self.qdrant_use_stub,
-            "vectorstore": self.qdrant_use_stub,
-            "docling": self.docling_use_stub,
-            "libreoffice": self.libreoffice_use_stub,
-            "escalation": self.escalation_use_stub,
-            "persistence": self.persistence_use_stub,
-        }
-        return mapping.get(service, True)
-
     def resolved_docs_corpus_path(self) -> str:
         """Local corpus directory (gitignored); DOCS_DIR overrides when set."""
         if self.docs_dir:
@@ -157,7 +131,7 @@ def get_settings() -> Settings:
 
 
 def clear_settings_cache() -> None:
-    """Drop Settings cache and DI container so API/CLI see fresh env flags."""
+    """Drop Settings cache and DI container so API/CLI see fresh env."""
     get_settings.cache_clear()
     # Avoid circular import at module load; clear container when available.
     try:

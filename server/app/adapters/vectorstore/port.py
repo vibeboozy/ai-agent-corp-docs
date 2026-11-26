@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.vectorstore.port
-PURPOSE: VectorStore Protocol/ABC — no Stub prefix (CS-STUB-01).
+PURPOSE: VectorStore Protocol/ABC for Qdrant-backed retrieval.
 Dependencies: typing.Protocol
 """
 
@@ -26,5 +26,5 @@ class VectorStore(Protocol):
         ...
 
     async def upsert(self, chunks: list[dict[str, Any]]) -> None:
-        """Upsert chunks into the active collection / stub KB."""
+        """Upsert chunks into the active collection."""
         ...

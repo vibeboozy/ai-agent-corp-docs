@@ -103,7 +103,7 @@ class LearningService:
 def _keywords_from_history(messages: list[Message], content: str) -> list[str]:
     blob = " ".join(m.content for m in messages if m.role.value == "user") + " " + content
     tokens = [t.strip(".,!?«»\"'").lower() for t in blob.split()]
-    # Keep informative tokens for stub keyword search.
+    # Keep informative tokens for retrieval/index text.
     stop = {"это", "про", "для", "или", "как", "что", "кто", "при", "без", "the", "and"}
     out: list[str] = []
     for t in tokens:

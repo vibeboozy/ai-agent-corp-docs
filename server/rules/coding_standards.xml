@@ -28,7 +28,7 @@
       Dialogue orchestration uses LangGraph StateGraph under server/app/application/dialogue/.
     </rule>
     <rule id="CS-LG-02">
-      Graph nodes call our ports (LLMClient, EmbeddingsClient, VectorStore, etc.) via DI — never hard-code Stub* or Http*.
+      Graph nodes call our ports (LLMClient, EmbeddingsClient, VectorStore, etc.) via DI — never hard-code Http*.
     </rule>
     <rule id="CS-LG-03">
       Do not use LangChain RetrievalQA, LCEL RAG chains, or LangChain vectorstore/docling wrappers as the primary RAG path.
@@ -37,7 +37,7 @@
       langchain-core is optional for message types only. Prefer domain Message models for persistence and API DTOs.
     </rule>
     <rule id="CS-LG-05">
-      Pin modern langgraph (and langchain-core if used) in pyproject.toml; keep stubs-first — graph must run offline.
+      Pin modern langgraph (and langchain-core if used) in pyproject.toml; graph topology must not depend on concrete adapters.
     </rule>
   </section>
 
@@ -93,23 +93,19 @@
     </rule>
   </section>
 
-  <section id="stubs" title="Stub naming and factories">
-    <rule id="CS-STUB-01">
-      Protocols/ABCs named without Stub prefix (e.g. LLMClient, EmbeddingsClient, VectorStore).
+  <section id="adapters_di" title="Adapter naming and factories">
+    <rule id="CS-DI-01">
+      Protocols/ABCs named without implementation prefix (e.g. LLMClient, EmbeddingsClient, VectorStore).
     </rule>
-    <rule id="CS-STUB-02">
-      Stub implementations: StubLLMClient, StubEmbeddingsClient, StubVectorStore, StubDoclingClient,
-      StubLibreOffice, StubEscalationNotifier, StubPersistence — under adapters/stubs/ or adapters/&lt;name&gt;/stub.py.
-    </rule>
-    <rule id="CS-STUB-03">
+    <rule id="CS-DI-02">
       Real implementations: HttpLLMClient, HttpEmbeddingsClient, QdrantVectorStore, HttpDoclingClient,
-      SqlAlchemyPersistence (PostgreSQL), etc.
+      SofficeLibreOffice, EmailEscalationNotifier, SqlAlchemyPersistence (PostgreSQL).
     </rule>
-    <rule id="CS-STUB-04">
-      Construction only via factory/DI reading Settings. Application services must not import Stub* or Http* directly.
+    <rule id="CS-DI-03">
+      Construction only via factory/DI reading Settings. Application services must not import Http* / Qdrant* directly.
     </rule>
-    <rule id="CS-STUB-05">
-      USE_STUBS=true forces all stubs. Per-service *_USE_STUB overrides when global is false.
+    <rule id="CS-DI-04">
+      Do not add USE_STUBS, *_USE_STUB, or Stub* adapters. Tests mock ports or HTTP; product runtime is always live.
     </rule>
   </section>
 
@@ -137,13 +133,13 @@
   <section id="persistence" title="PostgreSQL persistence">
     <rule id="CS-DB-01">
       PostgreSQL is the system of record for appeals, messages, escalations, audit, and stats inputs.
-      Data must survive process restarts when PERSISTENCE_USE_STUB=false.
+      Data must survive process restarts.
     </rule>
     <rule id="CS-DB-02">
       Real adapter: SQLAlchemy 2.x async + asyncpg. Migrations via Alembic. Connection string: DATABASE_URL.
     </rule>
     <rule id="CS-DB-03">
-      StubPersistence (in-memory) for unit tests. Naming: StubPersistence vs SqlAlchemyPersistence (or PostgresPersistence).
+      Naming: SqlAlchemyPersistence (or PostgresPersistence). Unit tests mock the Persistence port.
     </rule>
     <rule id="CS-DB-04">
       Application services depend on the Persistence port only — never import sqlalchemy in routers or LangGraph node modules directly.

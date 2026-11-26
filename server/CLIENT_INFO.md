@@ -197,7 +197,7 @@ List messages (chat history). **Primary client read path for polling.**
 
 Send a user (or allowed system) message; server runs one agent turn and returns new messages from that turn (at least the user message + assistant/system outcome).
 
-**Request**
+**Request** — flat body (not nested under `message` like `POST /appeals`):
 
 ```json
 {
@@ -307,6 +307,8 @@ Do **not** invent answers client-side. Display citations when present; link/docu
 ## 5. Persistence note for clients
 
 Appeals, messages, escalations, audit, and stats aggregates are stored in **PostgreSQL** (see server `project_context.md`). After a server restart, `GET` list/history/stats must return the same data. Clients can rely on durable IDs.
+
+The server always uses live LLM/embeddings/Qdrant/Docling/Postgres (no stub mode). `GET /health/dependencies` reports per-service `mode=live`.
 
 ---
 

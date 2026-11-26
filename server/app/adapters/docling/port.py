@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.docling.port
-PURPOSE: DoclingClient Protocol/ABC — no Stub prefix (CS-STUB-01).
+PURPOSE: DoclingClient Protocol/ABC for document conversion.
 Dependencies: typing.Protocol
 """
 

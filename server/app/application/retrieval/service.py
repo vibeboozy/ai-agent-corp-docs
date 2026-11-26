@@ -1,6 +1,6 @@
 """
 ANCHOR: app.application.retrieval.service
-PURPOSE: Hybrid retrieval via embeddings + vectorstore ports (stub-friendly).
+PURPOSE: Hybrid retrieval via embeddings + vectorstore ports.
 Dependencies: embeddings port, vectorstore port
 DO:
 - Prefer latest effective docs when configured

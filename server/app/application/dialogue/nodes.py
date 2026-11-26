@@ -2,9 +2,9 @@
 ANCHOR: app.application.dialogue.nodes
 PURPOSE: LangGraph node callables (assess, clarify, retrieve, ground, answer, escalate).
 Dependencies: retrieval, grounding, quality_escalation, llm port via DI
-CRITICAL: Nodes must call ports — never hard-code Stub* or Http* (CS-LG-02).
+CRITICAL: Nodes must call ports — never hard-code Http* (CS-LG-02).
 DO:
-- Same node functions for stub and live adapters
+- Same node functions for all DI-wired adapters
 DONT:
 - Return ungrounded final answers
 """
@@ -78,7 +78,7 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
 
     async def retrieve(state: DialogueState) -> DialogueState:
         query = state.get("user_message") or ""
-        # Include prior user clarifications for better stub keyword hit rate.
+        # Include prior user clarifications for better retrieval context.
         hist = list(state.get("history") or [])
         if hist:
             query = " ".join(hist[-4:] + [query])

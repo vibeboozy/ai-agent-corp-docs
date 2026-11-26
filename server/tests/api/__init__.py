@@ -1,5 +1,4 @@
 """
 ANCHOR: tests.api
-PURPOSE: Test stubs for api layer.
-Dependencies: pytest
+PURPOSE: API layer tests (contract + live-gated flows).
 """

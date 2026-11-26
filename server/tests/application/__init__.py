@@ -1,5 +1,4 @@
 """
 ANCHOR: tests.application
-PURPOSE: Test stubs for application layer.
-Dependencies: pytest
+PURPOSE: Application layer tests (graph unit + live-gated dialogue).
 """

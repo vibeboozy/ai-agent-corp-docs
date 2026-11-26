@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Testing rules — stubs by default; live LLM/embeddings/Qdrant/Docling gated by env.
+  Testing rules — unit/mocked HTTP by default; live LLM/embeddings/Qdrant/Docling gated by env.
   Scope: server/
 -->
 <testing_rules scope="server">
@@ -10,30 +10,30 @@
       Framework: pytest + pytest-asyncio. Prefer httpx ASGITransport for API tests.
     </rule>
     <rule id="TEST-GEN-02">
-      Default test settings: USE_STUBS=true and all *_USE_STUB=true. CI must not require network to
-      LLM/embeddings/Qdrant/Docling.
+      Default CI: RUN_LIVE_*=0. Unit/contract tests must not require network to
+      LLM/embeddings/Qdrant/Docling/Postgres. There is no stub mode.
     </rule>
     <rule id="TEST-GEN-03">
       Markers: unit (default), contract, behavior, integration, e2e, demo.
       Live suites use @pytest.mark.integration and/or @pytest.mark.e2e and skip unless the matching RUN_LIVE_* flag is set.
     </rule>
     <rule id="TEST-GEN-04">
-      Deterministic stubs: fixed fixture answers for the same input; no wall-clock flakiness.
+      Prefer deterministic mocked HTTP / MagicMock ports for unit tests; no wall-clock flakiness.
     </rule>
     <rule id="TEST-GEN-05">
       Working directory for pytest: server/ (or configure pytest rootdir to server/).
     </rule>
   </section>
 
-  <section id="unit" title="Unit tests with stubs">
+  <section id="unit" title="Unit tests">
     <rule id="TEST-UNIT-01">
-      Unit-test dialogue LangGraph nodes, grounding, learning, escalation with injected Stub* clients — no FastAPI required.
+      Unit-test dialogue LangGraph nodes, grounding, learning, escalation with injected mock ports — no FastAPI required.
     </rule>
     <rule id="TEST-UNIT-02">
-      VectorStore stub returns controllable hit lists to exercise RRF/rerank/prefer-latest branches.
+      VectorStore mocks return controllable hit lists to exercise RRF/rerank/prefer-latest branches.
     </rule>
     <rule id="TEST-UNIT-03">
-      LLM stub can return scripted clarify vs answer drafts; grounding must still enforce citations from retrieval stub.
+      LLM mocks can return scripted clarify vs answer drafts; grounding must still enforce citations from retrieval mocks.
     </rule>
     <rule id="TEST-UNIT-04">
       Assert graph routing: underspecified → clarify; supported hits → answer; empty/unsupported → escalate.
@@ -48,27 +48,27 @@
       OpenAPI schema generation must succeed in CI; breaking field renames require version bump discussion.
     </rule>
     <rule id="TEST-API-03">
-      Persistence unit tests use StubPersistence (or isolated schema). No shared mutable DB state across tests.
+      Persistence durability tests use Postgres via RUN_LIVE_POSTGRES=1. No shared mutable DB state across tests.
     </rule>
     <rule id="TEST-API-04">
-      Restart durability: with Postgres + PERSISTENCE_USE_STUB=false, create appeal/messages, dispose engine,
+      Restart durability: with Postgres, create appeal/messages, dispose engine,
       reconnect, assert history and stats still present (integration / RUN_LIVE_POSTGRES).
     </rule>
   </section>
 
-  <section id="behavior" title="Groundedness and escalation behavior (stubs)">
+  <section id="behavior" title="Groundedness and escalation behavior">
     <rule id="TEST-BEH-01">
-      When stub retrieval returns empty/insufficient hits: response is escalate or clarify — never a fabricated regulation quote.
+      When retrieval returns empty/insufficient hits: response is escalate or clarify — never a fabricated regulation quote.
     </rule>
     <rule id="TEST-BEH-02">
-      When hits support the answer: response includes citations with chunk/document ids present in stub corpus.
+      When hits support the answer: response includes citations with chunk/document ids present in the corpus.
     </rule>
     <rule id="TEST-BEH-03">
       Underspecified user question: assistant asks clarifying question; appeal status clarifying;
       no premature escalate unless max clarify turns exceeded.
     </rule>
     <rule id="TEST-BEH-04">
-      Officer-reply: creates officer message, triggers learning/ingest stub, subsequent query can answer from updated stub KB.
+      Officer-reply: creates officer message, triggers learning/ingest, subsequent query can answer from updated KB.
     </rule>
     <rule id="TEST-BEH-05">
       Assert audit/log events (or persistence audit rows) for escalate and learn paths.
@@ -81,18 +81,18 @@
     </rule>
     <rule id="TEST-LIVE-02">
       Per-service gates (smoke): RUN_LIVE_LLM=1, RUN_LIVE_EMBEDDINGS=1, RUN_LIVE_QDRANT=1, RUN_LIVE_DOCLING=1,
-      RUN_LIVE_POSTGRES=1. Each test skips unless its gate is set AND the corresponding *_USE_STUB=false
-      AND required URL/key env vars are non-empty (DATABASE_URL for Postgres).
+      RUN_LIVE_POSTGRES=1. Each test skips unless its gate is set AND required URL/key env vars are non-empty
+      (DATABASE_URL for Postgres).
     </rule>
     <rule id="TEST-LIVE-03">
-      Full product path: RUN_LIVE_E2E=1 requires USE_STUBS=false (or all critical adapters live) and keys for
-      LLM + embeddings + Qdrant + Postgres at minimum; Docling required only for ingest scenarios.
+      Full product path: RUN_LIVE_E2E=1 requires keys for LLM + embeddings + Qdrant + Postgres at minimum;
+      Docling required only for ingest scenarios.
     </rule>
     <rule id="TEST-LIVE-04">
       Missing flags or secrets → pytest.skip with a clear reason. Never fail CI because live infra is absent.
     </rule>
     <rule id="TEST-LIVE-05">
-      Before live runs: copy .env.example → .env, set real base URLs/keys, set USE_STUBS=false and the needed *_USE_STUB=false.
+      Before live runs: copy .env.example → .env, set real base URLs/keys.
     </rule>
   </section>
 
@@ -124,7 +124,7 @@
     </rule>
     <rule id="TEST-E2E-02">
       Clarifying dialogue: send underspecified question; assert clarification message and clarifying status;
-      then supply details; assert eventual answer or escalate per policy.
+      then supply details via POST /appeals/{id}/messages with flat body {"content":"..."}; assert eventual answer or escalate per policy.
     </rule>
     <rule id="TEST-E2E-03">
       Escalation: ask out-of-KB question; assert escalation entity, user notice, no invented citations.
@@ -138,10 +138,11 @@
     </rule>
     <rule id="TEST-E2E-06">
       Example commands (from server/):
-      USE_STUBS=true pytest
-      USE_STUBS=false RUN_LIVE_LLM=1 RUN_LIVE_EMBEDDINGS=1 pytest -m integration
-      USE_STUBS=false RUN_LIVE_TESTS=1 pytest -m integration
-      USE_STUBS=false RUN_LIVE_E2E=1 pytest -m e2e
+      pytest
+      RUN_LIVE_LLM=1 RUN_LIVE_EMBEDDINGS=1 pytest -m integration
+      RUN_LIVE_TESTS=1 pytest -m integration
+      RUN_LIVE_E2E=1 pytest -m e2e
+      rag-server check
     </rule>
   </section>
 
@@ -150,19 +151,22 @@
       No real HTTP to LLM_BASE_URL / EMBEDDINGS_BASE_URL / QDRANT_URL / DOCLING_BASE_URL unless a RUN_LIVE_* flag is set.
     </rule>
     <rule id="TEST-NO-02">
-      No dependency on soffice binary in default unit tests — StubLibreOffice only.
+      No dependency on soffice binary in default unit tests.
     </rule>
     <rule id="TEST-NO-03">
       Do not assert on live model wording; assert on structure, citations, status, and policy outcomes.
+    </rule>
+    <rule id="TEST-NO-04">
+      Do not reintroduce USE_STUBS, *_USE_STUB, or Stub* adapters under app/adapters/stubs/.
     </rule>
   </section>
 
   <section id="demo" title="Demo scenarios">
     <rule id="TEST-DEMO-01">
-      Provide pytest markers or scripts for the three prototype success criteria (grounded, clarify, learn) runnable offline.
+      Provide pytest markers or scripts for the three prototype success criteria (grounded, clarify, learn) against live infra.
     </rule>
     <rule id="TEST-DEMO-02">
-      Same scenarios should be invokable with RUN_LIVE_E2E=1 when infra is available; document both paths in README.
+      Same scenarios should be invokable with RUN_LIVE_E2E=1 when infra is available; document path in README / DEMO.md.
     </rule>
   </section>
 

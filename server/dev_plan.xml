@@ -2,52 +2,51 @@
 <!--
   Phased development plan for the Corporate RAG AI-Agent server.
   Implement in order. Each phase ends with acceptance checks before the next.
-  Stubs-first: live LLM/embeddings/Qdrant/Docling only after flags in phase 4+.
+  Real adapters only: no USE_STUBS / Stub* path — live suites gated by RUN_LIVE_*.
 -->
 <dev_plan project="ai-agent-corp-docs" scope="server">
 
   <principles>
     <item>Do not skip grounding/escalation for demo speed.</item>
-    <item>Default CI and local: USE_STUBS=true; live suites gated by RUN_LIVE_*.</item>
+    <item>Always wire real LLM/embeddings/Qdrant/Docling/Postgres clients; live suites gated by RUN_LIVE_*.</item>
     <item>Keep REST contracts stable after phase 1; version if breaking.</item>
     <item>Russian user-facing copy OK; identifiers English.</item>
     <item>All product work under server/ (rules, context, app, tests).</item>
     <item>LangGraph for dialogue graph; do not adopt LangChain RetrievalQA as primary RAG.</item>
   </principles>
 
-  <phase id="1" name="skeleton_stubs_rest_contracts">
+  <phase id="1" name="skeleton_rest_contracts" status="done">
     <goals>
-      <goal>Create server/ package layout (api, application, domain, adapters, stubs, config).</goal>
-      <goal>Wire FastAPI app with OpenAPI for all minimum endpoints (may return stub payloads).</goal>
+      <goal>Create server/ package layout (api, application, domain, adapters, config).</goal>
+      <goal>Wire FastAPI app with OpenAPI for all minimum endpoints.</goal>
       <goal>Settings from env; .env.example consumed by pydantic-settings.</goal>
-      <goal>Global USE_STUBS + per-adapter factories returning Stub* implementations.</goal>
-      <goal>Declare langgraph (+ optional langchain-core) in pyproject; placeholder dialogue graph module.</goal>
+      <goal>DI factories returning real Http*/Qdrant*/SqlAlchemy adapters.</goal>
+      <goal>Declare langgraph (+ optional langchain-core) in pyproject; dialogue graph module.</goal>
     </goals>
     <deliverables>
       <item>server/pyproject.toml, app entrypoint, health check</item>
-      <item>Router stubs for appeals/messages/officer-reply/stats</item>
-      <item>Empty/stub adapter protocols + StubLLM, StubEmbeddings, StubVectorStore, StubDocling, StubEscalation</item>
+      <item>Routers for appeals/messages/officer-reply/stats</item>
+      <item>Adapter protocols + HttpLLM, HttpEmbeddings, QdrantVectorStore, HttpDocling, EmailEscalation</item>
       <item>Contract OpenAPI snapshot or schema tests</item>
-      <item>Skeleton StateGraph file under application/dialogue/</item>
+      <item>StateGraph under application/dialogue/</item>
     </deliverables>
     <acceptance>
-      <check>uvicorn boots with USE_STUBS=true; no outbound AI calls</check>
+      <check>uvicorn boots with configured env; adapters constructed from Settings</check>
       <check>All documented REST paths exist and validate request/response models</check>
-      <check>Factories selectable by env without code changes</check>
-      <check>langgraph importable; graph compiles with stub no-op nodes</check>
+      <check>langgraph importable; graph compiles with DI-injected nodes</check>
     </acceptance>
   </phase>
 
-  <phase id="2" name="persistence_appeal_message_flows">
+  <phase id="2" name="persistence_appeal_message_flows" status="done">
     <goals>
       <goal>PostgreSQL as system of record via SQLAlchemy 2 async + asyncpg.</goal>
-      <goal>StubPersistence for unit tests; PERSISTENCE_USE_STUB / DATABASE_URL from env.</goal>
+      <goal>DATABASE_URL from env; SqlAlchemyPersistence only.</goal>
       <goal>Implement list/get/create appeal; append and list messages; history survives restart.</goal>
       <goal>Appeal status transitions + audit events durable in Postgres.</goal>
       <goal>Stats aggregates readable from DB (even if thin).</goal>
     </goals>
     <deliverables>
-      <item>Domain models + Persistence port + StubPersistence + SqlAlchemyPersistence</item>
+      <item>Domain models + Persistence port + SqlAlchemyPersistence</item>
       <item>Alembic migrations for appeals, messages, escalations, audit_events</item>
       <item>Working appeal/message API against Postgres</item>
       <item>CLIENT_INFO.md kept in sync with response shapes</item>
@@ -56,37 +55,36 @@
       <check>Create appeal → post message → restart app → GET messages returns same history</check>
       <check>GET /appeals filters by status</check>
       <check>Audit trail rows present for mutations</check>
-      <check>Unit tests pass with StubPersistence; optional RUN_LIVE_POSTGRES integration</check>
+      <check>Optional RUN_LIVE_POSTGRES integration</check>
     </acceptance>
   </phase>
 
-  <phase id="3" name="stub_rag_dialogue_escalation">
+  <phase id="3" name="rag_dialogue_escalation" status="done">
     <goals>
-      <goal>Implement LangGraph dialogue: clarify / grounded answer / escalate using stub retrieval.</goal>
-      <goal>Grounding policy: no answer without stub citations matching fixture regulations.</goal>
-      <goal>Escalation creates ticket + StubEscalation notify + user-facing Russian notice.</goal>
+      <goal>Implement LangGraph dialogue: clarify / grounded answer / escalate via retrieval ports.</goal>
+      <goal>Grounding policy: no answer without citations matching retrieved regulation chunks.</goal>
+      <goal>Escalation creates ticket + notifier + user-facing Russian notice.</goal>
       <goal>Underspecified questions produce clarifying assistant messages.</goal>
     </goals>
     <deliverables>
-      <item>StateGraph nodes wired to grounding + quality_escalation + stub ports</item>
-      <item>Fixture KB in stubs for demo Q&amp;A</item>
-      <item>Behavior tests for clarify/answer/escalate (stubs; no live calls)</item>
+      <item>StateGraph nodes wired to grounding + quality_escalation + ports</item>
+      <item>Live/e2e behavior tests gated by RUN_LIVE_E2E</item>
     </deliverables>
     <acceptance>
-      <check>Known fixture question → answer with citations</check>
+      <check>Known corpus question → answer with citations</check>
       <check>Ambiguous question → clarification, status clarifying</check>
       <check>Unknown topic → escalate, no invented regulation text</check>
-      <check>Success criteria 1 and 2 demonstrable with stubs</check>
+      <check>Success criteria 1 and 2 demonstrable with live infra</check>
       <check>Graph path auditable (node outcomes logged or asserted)</check>
     </acceptance>
   </phase>
 
-  <phase id="4" name="real_adapters_behind_flags">
+  <phase id="4" name="real_adapters_and_live_gates" status="done">
     <goals>
-      <goal>Implement HttpLLM, HttpEmbeddings, QdrantVectorStore, HttpDocling, LibreOffice adapter.</goal>
-      <goal>Enable via *_USE_STUB=false without changing application services or graph topology.</goal>
+      <goal>HttpLLM, HttpEmbeddings, QdrantVectorStore, HttpDocling, LibreOffice adapters are the only path.</goal>
       <goal>Timeouts, batch sizes, and error mapping from env.</goal>
-      <goal>Add tests/integration/ with RUN_LIVE_* skips when secrets/infra absent.</goal>
+      <goal>tests/integration/ with RUN_LIVE_* skips when secrets/infra absent.</goal>
+      <goal>Keep rag-server check + /health/dependencies for live probes.</goal>
     </goals>
     <deliverables>
       <item>Real adapters using httpx / qdrant-client</item>
@@ -95,8 +93,8 @@
       <item>Document how to run live tests in README / testing_rules</item>
     </deliverables>
     <acceptance>
-      <check>CI still green with stubs only (RUN_LIVE_*=0)</check>
-      <check>With secrets present, flipping flags + RUN_LIVE_* reaches real services</check>
+      <check>CI green with RUN_LIVE_*=0 (live suites skip)</check>
+      <check>With secrets present, RUN_LIVE_* reaches real services</check>
       <check>Failures surface as typed errors; no secret leakage in logs</check>
     </acceptance>
   </phase>
@@ -113,25 +111,25 @@
       <item>Idempotent re-ingest by checksum where feasible</item>
     </deliverables>
     <acceptance>
-      <check>Sample docx appears as searchable chunks (stub or real per flags)</check>
+      <check>Sample docx appears as searchable chunks against live Docling/Qdrant</check>
       <check>Alias points to active collection after swap</check>
       <check>Retrieval prefer-latest respects document version/effective_date when set</check>
     </acceptance>
   </phase>
 
-  <phase id="6" name="learning_loop">
+  <phase id="6" name="learning_loop" status="done">
     <goals>
       <goal>POST officer-reply stores canonical answer, resolves escalation, triggers KB update.</goal>
-      <goal>Subsequent similar questions can be answered from updated KB (stub or real).</goal>
+      <goal>Subsequent similar questions can be answered from updated KB.</goal>
       <goal>Log all learning events.</goal>
-      <goal>Stub e2e + optional RUN_LIVE_E2E learning scenario.</goal>
+      <goal>RUN_LIVE_E2E learning scenario (skips without infra).</goal>
     </goals>
     <deliverables>
       <item>learning service wired to ingest</item>
-      <item>Tests: escalate → officer-reply → answer on replay (stubs always; live optional)</item>
+      <item>Tests: escalate → officer-reply → answer on replay (live optional)</item>
     </deliverables>
     <acceptance>
-      <check>Success criterion 3 demonstrable end-to-end with stubs</check>
+      <check>Success criterion 3 demonstrable end-to-end with live infra</check>
       <check>Appeal status resolved_by_officer / closed as designed</check>
       <check>Audit contains officer + ingest linkage</check>
       <check>Live e2e learning test skips cleanly without RUN_LIVE_E2E</check>
@@ -157,18 +155,18 @@
 
   <phase id="8" name="prototype_demo_scenarios">
     <goals>
-      <goal>Scripted scenarios covering all three success criteria.</goal>
-      <goal>Seed fixtures + demo script (curl or pytest marker demo).</goal>
+      <goal>Scripted scenarios covering all three success criteria against live services.</goal>
+      <goal>Demo script (curl or pytest marker e2e).</goal>
       <goal>Document demo path for stakeholders (Russian narrative OK).</goal>
-      <goal>Document live RUN_LIVE_E2E path for the same scenarios when infra is up.</goal>
+      <goal>Document RUN_LIVE_E2E path in DEMO.md / README.</goal>
     </goals>
     <deliverables>
       <item>scenarios: grounded answer; clarify then answer; escalate + officer learn</item>
-      <item>Short DEMO.md under server/</item>
+      <item>Short DEMO.md under server/ (flat POST /messages body {"content":"..."})</item>
     </deliverables>
     <acceptance>
-      <check>All three criteria runnable offline with stubs</check>
-      <check>Optional live path documented but not required for the core prototype demo</check>
+      <check>All three criteria runnable with configured live infra</check>
+      <check>rag-server check reports mode=live for all dependencies</check>
     </acceptance>
   </phase>
 
@@ -176,6 +174,7 @@
     <item>Full client UI</item>
     <item>Production SSO</item>
     <item>Multi-region Qdrant HA</item>
+    <item>Stub / offline mode (explicitly removed)</item>
   </out_of_scope_until_later>
 
 </dev_plan>

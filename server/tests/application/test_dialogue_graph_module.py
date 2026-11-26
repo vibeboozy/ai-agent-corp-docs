@@ -1,14 +1,13 @@
 """
 ANCHOR: tests.application.test_dialogue_graph_module
-PURPOSE: Assert dialogue graph module shape and LangGraph compile with stubs.
+PURPOSE: Assert dialogue graph module shape and LangGraph compile with mocked ports.
 Dependencies: app.application.dialogue.graph
 """
 
 from __future__ import annotations
 
-from app.adapters.stubs.embeddings import StubEmbeddingsClient
-from app.adapters.stubs.llm import StubLLMClient
-from app.adapters.stubs.vectorstore import StubVectorStore
+from unittest.mock import AsyncMock, MagicMock
+
 from app.application.dialogue.graph import build_dialogue_graph, compile_placeholder_graph
 from app.application.dialogue.nodes import DialogueDeps
 from app.application.dialogue.state import DialogueState
@@ -21,13 +20,18 @@ def test_placeholder_graph_descriptor() -> None:
     assert desc["state"] is DialogueState
 
 
-def test_langgraph_compiles_with_stub_nodes() -> None:
+def test_langgraph_compiles_with_mocked_ports() -> None:
+    embeddings = MagicMock()
+    embeddings.embed_dense = AsyncMock(return_value=[[0.1, 0.2]])
+    vectorstore = MagicMock()
+    vectorstore.search = AsyncMock(return_value=[])
+    llm = MagicMock()
+    llm.complete = AsyncMock(return_value="ok")
+    llm.classify_specificity = AsyncMock(return_value="specific")
+
     deps = DialogueDeps(
-        llm=StubLLMClient(),
-        retrieval=RetrievalService(
-            embeddings=StubEmbeddingsClient(),
-            vectorstore=StubVectorStore(),
-        ),
+        llm=llm,
+        retrieval=RetrievalService(embeddings=embeddings, vectorstore=vectorstore),
         grounding=GroundingService(),
         quality_email="quality@example.invalid",
     )

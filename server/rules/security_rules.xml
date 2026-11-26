@@ -14,7 +14,8 @@
       Do not put secrets in URLs logged to console; redact Authorization and api_key query params in logs.
     </rule>
     <rule id="SEC-SECRET-04">
-      Stub mode must work with empty/placeholder keys so developers do not need production secrets.
+      Never commit real keys. Local `.env` holds secrets; `.env.example` uses placeholders only.
+      Unit tests must not require production secrets (mock HTTP / skip live suites).
     </rule>
   </section>
 

@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.libreoffice.port
-PURPOSE: LibreOfficeConverter Protocol/ABC — no Stub prefix (CS-STUB-01).
+PURPOSE: LibreOfficeConverter Protocol/ABC for soffice conversion.
 Dependencies: typing.Protocol
 """
 

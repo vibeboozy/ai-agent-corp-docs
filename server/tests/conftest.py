@@ -1,7 +1,7 @@
 """
 ANCHOR: tests.conftest
-PURPOSE: Shared pytest fixtures (ASGI client + stub resets).
-Dependencies: app.main, app.config.factories, stubs.fixtures
+PURPOSE: Shared pytest fixtures (ASGI client + DI cache resets).
+Dependencies: app.main, app.config.factories
 """
 
 from __future__ import annotations
@@ -11,23 +11,16 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-# Force stubs for unit/API tests unless a live suite opts in.
-os.environ.setdefault("USE_STUBS", "true")
-os.environ.setdefault("PERSISTENCE_USE_STUB", "true")
-
-from app.adapters.stubs.fixtures import SHARED_FIXTURE_KB
 from app.config.factories import reset_container
 from app.config.settings import clear_settings_cache
 from app.main import create_app
 
 
 @pytest.fixture(autouse=True)
-def _reset_stubs() -> None:
-    SHARED_FIXTURE_KB.reset()
+def _reset_di() -> None:
     clear_settings_cache()
     reset_container()
     yield
-    SHARED_FIXTURE_KB.reset()
     clear_settings_cache()
     reset_container()
 

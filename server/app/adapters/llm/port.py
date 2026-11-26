@@ -1,6 +1,6 @@
 """
 ANCHOR: app.adapters.llm.port
-PURPOSE: LLMClient Protocol/ABC — no Stub prefix (CS-STUB-01).
+PURPOSE: LLMClient Protocol/ABC for chat completions.
 Dependencies: typing.Protocol
 """
 
@@ -28,6 +28,6 @@ class LLMClient(Protocol):
     async def classify_specificity(self, user_message: str, history: list[str] | None = None) -> str:
         """
         Return one of: underspecified | specific | ambiguous.
-        Used by assess_specificity node (stub or live).
+        Used by assess_specificity node.
         """
         ...

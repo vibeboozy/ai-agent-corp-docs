@@ -6,7 +6,7 @@ DO:
 - Print per-dependency ok/fail without secrets
 - Expose via console_scripts `rag-server` and `python -m app.cli`
 DONT:
-- Require live infra when USE_STUBS=true
+- Hide dependency failures (always probes live adapters)
 """
 
 from __future__ import annotations

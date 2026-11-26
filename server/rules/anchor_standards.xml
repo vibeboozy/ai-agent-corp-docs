@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Anchor standards: how agents must ground answers, clarify, escalate, learn, and use stubs.
+  Anchor standards: how agents must ground answers, clarify, escalate, and learn.
   These rules override convenience of "just answering".
 -->
 <anchor_standards scope="server" domain="russian_corporate_regulations">
@@ -65,25 +65,25 @@
       Canonical officer text is an allowed source for new chunks; still store provenance (officer, appeal_id, timestamp).
     </rule>
     <rule id="ANC-LEARN-03">
-      After learning, subsequent equivalent questions SHOULD be answerable with citations to the new/updated chunks (stub or real).
+      After learning, subsequent equivalent questions SHOULD be answerable with citations to the new/updated chunks.
     </rule>
     <rule id="ANC-LEARN-04">
       Log all appeals and all learning events (continuous learning criterion).
     </rule>
   </section>
 
-  <section id="stubs" title="When to use stubs">
-    <rule id="ANC-STUB-01" priority="critical">
-      Local development and CI: USE_STUBS=true (or per-adapter stubs). No live LLM/embeddings/Qdrant/Docling required.
+  <section id="adapters" title="Real adapters and configuration">
+    <rule id="ANC-ADAPT-01" priority="critical">
+      Runtime always uses real LLM/embeddings/Qdrant/Docling/Postgres clients from Settings. No stub mode.
     </rule>
-    <rule id="ANC-STUB-02">
-      Stub retrieval corpus must be rich enough to demo: grounded hit, ambiguous multi-hit, empty hit.
+    <rule id="ANC-ADAPT-02">
+      Live corpus must support demos: grounded hit, ambiguous multi-hit, empty/out-of-KB hit.
     </rule>
-    <rule id="ANC-STUB-03">
-      Switching to real clients is configuration only; anchor rules above still apply unchanged.
+    <rule id="ANC-ADAPT-03">
+      Changing providers is configuration only (URLs/keys); anchor rules above still apply unchanged.
     </rule>
-    <rule id="ANC-STUB-04">
-      Agents implementing features must not bypass grounding because "stub already returns nice text" —
+    <rule id="ANC-ADAPT-04">
+      Agents implementing features must not bypass grounding because a model draft "looks nice" —
       citations and policy checks remain mandatory.
     </rule>
   </section>
@@ -124,7 +124,7 @@
     </rule>
     <rule id="ANC-MARK-02">
       Include CRITICAL when the module enforces or sits on a success-criterion path
-      (grounding, escalate, clarify, learn, stubs-default). Cite ANC-* / CS-* ids when possible.
+      (grounding, escalate, clarify, learn). Cite ANC-* / CS-* ids when possible.
     </rule>
     <rule id="ANC-MARK-03">
       Include DO / DONT bullet lists when the module has recurring agent pitfalls

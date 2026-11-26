@@ -1,11 +1,12 @@
 """
 ANCHOR: app.application.connectivity.service
-PURPOSE: Probe LLM/embeddings/Qdrant/Docling/Postgres health (stub or live).
-Dependencies: adapter ports via Container; Settings stub flags
+PURPOSE: Probe LLM/embeddings/Qdrant/Docling/Postgres health (live adapters).
+Dependencies: adapter ports via Container
 DO:
 - Report per-service ok/fail without leaking secrets
 DONT:
 - Fail the process health endpoint on optional upstream outages alone
+- Report stub mode (stubs removed)
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import Any, Awaitable, Callable
 class DependencyStatus:
     name: str
     ok: bool
-    mode: str  # stub | live
+    mode: str  # always "live"
     detail: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -28,7 +29,6 @@ class DependencyStatus:
 async def _safe_ping(
     name: str,
     *,
-    mode: str,
     ping: Callable[[], Awaitable[bool]],
 ) -> DependencyStatus:
     try:
@@ -36,20 +36,20 @@ async def _safe_ping(
         return DependencyStatus(
             name=name,
             ok=ok,
-            mode=mode,
+            mode="live",
             detail=None if ok else "ping returned false",
         )
     except Exception as exc:  # noqa: BLE001 — surface adapter failures as status
         return DependencyStatus(
             name=name,
             ok=False,
-            mode=mode,
+            mode="live",
             detail=type(exc).__name__,
         )
 
 
 class ConnectivityService:
-    """Run connectivity probes against DI-selected adapters."""
+    """Run connectivity probes against DI-wired live adapters."""
 
     def __init__(
         self,
@@ -59,31 +59,20 @@ class ConnectivityService:
         vectorstore: Any,
         docling: Any,
         persistence: Any,
-        stub_flags: dict[str, bool],
     ) -> None:
         self._llm = llm
         self._embeddings = embeddings
         self._vectorstore = vectorstore
         self._docling = docling
         self._persistence = persistence
-        self._stub_flags = stub_flags
-
-    def _mode(self, key: str) -> str:
-        return "stub" if self._stub_flags.get(key, True) else "live"
 
     async def check_all(self) -> list[DependencyStatus]:
         return [
-            await _safe_ping("llm", mode=self._mode("llm"), ping=self._llm.ping),
-            await _safe_ping(
-                "embeddings", mode=self._mode("embeddings"), ping=self._embeddings.ping
-            ),
-            await _safe_ping(
-                "qdrant", mode=self._mode("vectorstore"), ping=self._vectorstore.ping
-            ),
-            await _safe_ping("docling", mode=self._mode("docling"), ping=self._docling.ping),
-            await _safe_ping(
-                "postgres", mode=self._mode("persistence"), ping=self._persistence.ping
-            ),
+            await _safe_ping("llm", ping=self._llm.ping),
+            await _safe_ping("embeddings", ping=self._embeddings.ping),
+            await _safe_ping("qdrant", ping=self._vectorstore.ping),
+            await _safe_ping("docling", ping=self._docling.ping),
+            await _safe_ping("postgres", ping=self._persistence.ping),
         ]
 
     async def check_report(self) -> dict[str, Any]:

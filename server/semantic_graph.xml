@@ -23,7 +23,9 @@
     <node id="config" layer="cross-cutting">
       <name>config</name>
       <path>server/app/config/</path>
-      <responsibility>Load env (pydantic-settings); USE_STUBS and per-adapter flags; expose Settings</responsibility>
+      <responsibility>
+        Load env (pydantic-settings); always wire real LLM/embeddings/Qdrant/Docling/Postgres adapters; expose Settings
+      </responsibility>
     </node>
 
     <node id="logging" layer="cross-cutting">
@@ -69,7 +71,7 @@
       <name>langgraph_runtime</name>
       <path>server/app/application/dialogue/graph.py</path>
       <responsibility>
-        Compile StateGraph; optional checkpointing keyed by appeal_id; same graph for stubs and live adapters.
+        Compile StateGraph; optional checkpointing keyed by appeal_id; same graph for all DI-wired adapters.
       </responsibility>
       <tech>langgraph</tech>
     </node>
@@ -115,6 +117,12 @@
       <success_criterion ref="3"/>
     </node>
 
+    <node id="connectivity" layer="application">
+      <name>connectivity</name>
+      <path>server/app/application/connectivity/</path>
+      <responsibility>Probe live LLM/embeddings/Qdrant/Docling/Postgres; power CLI check + /health/dependencies</responsibility>
+    </node>
+
     <node id="persistence" layer="adapters">
       <name>persistence</name>
       <path>server/app/adapters/persistence/</path>
@@ -131,22 +139,16 @@
       <responsibility>Real PostgreSQL adapter (async engine, sessions, migrations)</responsibility>
     </node>
 
-    <node id="persistence_stub" layer="adapters">
-      <name>StubPersistence</name>
-      <path>server/app/adapters/stubs/ or persistence/stub.py</path>
-      <responsibility>In-memory persistence for unit tests; not durable across restarts</responsibility>
-    </node>
-
     <node id="adapter_llm" layer="adapters">
       <name>adapters.llm</name>
       <path>server/app/adapters/llm/</path>
-      <responsibility>OpenAI-compatible chat completions port</responsibility>
+      <responsibility>OpenAI-compatible chat completions port + HttpLLMClient</responsibility>
     </node>
 
     <node id="adapter_embeddings" layer="adapters">
       <name>adapters.embeddings</name>
       <path>server/app/adapters/embeddings/</path>
-      <responsibility>Dense + sparse /embeddings port (bge-m3)</responsibility>
+      <responsibility>Dense + sparse /embeddings port (bge-m3) + HttpEmbeddingsClient</responsibility>
     </node>
 
     <node id="adapter_qdrant" layer="adapters">
@@ -173,15 +175,6 @@
       <responsibility>Email/queue notification to quality service</responsibility>
     </node>
 
-    <node id="stubs" layer="adapters">
-      <name>stubs</name>
-      <path>server/app/adapters/stubs/</path>
-      <responsibility>
-        Deterministic StubLLM, StubEmbeddings, StubVectorStore, StubDocling,
-        StubLibreOffice, StubEscalation — default for local/CI.
-      </responsibility>
-    </node>
-
   </nodes>
 
   <!-- ========== EDGES ========== -->
@@ -193,6 +186,7 @@
     <edge from="api" to="dialogue" type="calls" when="POST messages"/>
     <edge from="api" to="learning" type="calls" when="POST officer-reply"/>
     <edge from="api" to="persistence" type="reads" when="GET stats / list"/>
+    <edge from="api" to="connectivity" type="calls" when="GET /health/dependencies"/>
 
     <!-- Dialogue / LangGraph core loop -->
     <edge from="dialogue" to="langgraph_runtime" type="depends_on"/>
@@ -238,24 +232,22 @@
     <edge from="appeals" to="persistence" type="persists"/>
     <edge from="appeals" to="persistence" type="reads"/>
 
-    <!-- Stub wiring -->
-    <edge from="stubs" to="adapter_llm" type="implements"/>
-    <edge from="stubs" to="adapter_embeddings" type="implements"/>
-    <edge from="stubs" to="adapter_qdrant" type="implements"/>
-    <edge from="stubs" to="adapter_docling" type="implements"/>
-    <edge from="stubs" to="adapter_libreoffice" type="implements"/>
-    <edge from="stubs" to="adapter_escalation_email" type="implements"/>
-    <edge from="stubs" to="persistence" type="implements" when="StubPersistence"/>
-    <edge from="persistence_stub" to="persistence" type="implements"/>
+    <!-- Connectivity -->
+    <edge from="connectivity" to="adapter_llm" type="calls"/>
+    <edge from="connectivity" to="adapter_embeddings" type="calls"/>
+    <edge from="connectivity" to="adapter_qdrant" type="calls"/>
+    <edge from="connectivity" to="adapter_docling" type="calls"/>
+    <edge from="connectivity" to="persistence" type="calls"/>
+
+    <!-- Real adapter wiring -->
     <edge from="persistence_postgres" to="persistence" type="implements"/>
-    <edge from="config" to="stubs" type="configures" when="USE_STUBS or *_USE_STUB"/>
     <edge from="config" to="adapter_llm" type="configures"/>
     <edge from="config" to="adapter_embeddings" type="configures"/>
     <edge from="config" to="adapter_qdrant" type="configures"/>
     <edge from="config" to="adapter_docling" type="configures"/>
     <edge from="config" to="adapter_libreoffice" type="configures"/>
     <edge from="config" to="adapter_escalation_email" type="configures"/>
-    <edge from="config" to="persistence" type="configures" when="DATABASE_URL / PERSISTENCE_USE_STUB"/>
+    <edge from="config" to="persistence" type="configures" when="DATABASE_URL"/>
 
     <!-- Observability -->
     <edge from="logging" to="api" type="observes"/>

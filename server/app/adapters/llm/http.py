@@ -2,7 +2,7 @@
 ANCHOR: app.adapters.llm.HttpLLMClient
 PURPOSE: Real HttpLLMClient — OpenAI-compatible chat completions behind flags.
 Dependencies: httpx; Settings
-CRITICAL: Selected only when USE_STUBS=false and matching *_USE_STUB=false.
+CRITICAL: Always used — real OpenAI-compatible chat client.
 DO:
 - Enforce *_TIMEOUT_S on clients
 - Map failures to typed errors without leaking secrets
@@ -146,5 +146,5 @@ class HttpLLMClient:
 _: LLMClient = HttpLLMClient(  # type: ignore[assignment]
     base_url="https://example.invalid/v1",
     api_key=None,
-    model="stub",
+    model="protocol-check",
 )

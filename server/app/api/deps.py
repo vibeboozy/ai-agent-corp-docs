@@ -5,7 +5,7 @@ Dependencies: app.config.factories, application.*
 DO:
 - Resolve ports via factories from Settings
 DONT:
-- Construct Stub*/Http* inside routers ad hoc
+- Construct Http*/Qdrant*/SqlAlchemy* inside routers ad hoc
 """
 
 from __future__ import annotations

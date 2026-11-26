@@ -5,7 +5,7 @@ Dependencies: sqlalchemy.ext.asyncio, asyncpg, Settings.DATABASE_URL
 DO:
 - Use alembic migrations in persistence phase
 DONT:
-- Use in-memory stub as demo durability
+- Drop durable history for convenience
 """
 
 from __future__ import annotations
