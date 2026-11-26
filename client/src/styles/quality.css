@@ -435,6 +435,25 @@
 
 /* Адаптивность для компактных экранов */
 @media (max-width: 900px) {
+  .quality-toolbar {
+    height: auto;
+    min-height: 44px;
+    padding: 6px 10px;
+    gap: 8px;
+    overflow-x: auto;
+  }
+
+  .quality-filters {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .filter-btn {
+    padding: 4px 8px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
   .quality-layout {
     flex-direction: column;
   }
@@ -442,15 +461,15 @@
     width: 100%;
     max-width: 100%;
     min-width: 100%;
-    max-height: 260px;
+    max-height: 240px;
     border-right: none;
     border-bottom: 1px solid var(--color-border);
   }
   .quality-content {
-    padding: 14px;
+    padding: 10px;
   }
   .ticket-detail-view {
-    padding: 14px;
+    padding: 12px;
   }
 }
 

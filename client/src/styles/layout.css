@@ -84,6 +84,8 @@ button, input, textarea, select {
 .brand-text {
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .brand-title {
@@ -92,6 +94,9 @@ button, input, textarea, select {
   color: var(--color-text-main);
   line-height: var(--line-height-tight);
   letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .brand-subtitle {
@@ -99,6 +104,9 @@ button, input, textarea, select {
   color: var(--color-text-secondary);
   font-weight: var(--font-weight-medium);
   letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Navigation tabs */
@@ -122,6 +130,21 @@ button, input, textarea, select {
   cursor: pointer;
   transition: all var(--transition-fast);
   position: relative;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tab-label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.tab-text-short {
+  display: none;
+}
+
+.tab-text-full {
+  display: inline;
 }
 
 .nav-tab:hover {
@@ -215,23 +238,37 @@ button, input, textarea, select {
   position: relative;
 }
 
-.icon-btn {
+.icon-btn,
+.btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0;
   border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background-color: var(--color-surface);
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: all var(--transition-fast);
+  flex-shrink: 0;
+  line-height: 1;
 }
 
-.icon-btn:hover {
+.icon-btn:hover,
+.btn-icon:hover {
   background-color: var(--color-surface-hover);
   color: var(--color-text-main);
+  border-color: var(--color-border);
+}
+
+.icon-btn svg,
+.btn-icon svg {
+  display: block;
+  pointer-events: none;
 }
 
 .settings-popover {
@@ -568,4 +605,141 @@ button, input, textarea, select {
 
 .toast-close:hover {
   color: var(--color-text-main);
+}
+
+/* Мобильные утилиты */
+.mobile-only {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: inline-flex !important;
+  }
+
+  .desktop-only {
+    display: none !important;
+  }
+
+  .app-header {
+    height: 50px;
+    padding: 0 8px;
+    gap: 6px;
+  }
+
+  .header-left {
+    gap: 8px;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .brand {
+    gap: 6px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .brand-icon {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+  }
+
+  .brand-icon svg {
+    width: 17px;
+    height: 17px;
+  }
+
+  .brand-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+
+  .brand-title {
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .brand-subtitle {
+    display: none;
+  }
+
+  .header-nav {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .nav-tab {
+    padding: 5px 8px;
+    font-size: 13px;
+    gap: 4px;
+  }
+
+  .nav-tab svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .tab-text-full {
+    display: none;
+  }
+
+  .tab-text-short {
+    display: inline;
+  }
+
+  .header-right {
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .mode-label {
+    display: none;
+  }
+
+  .segmented-control {
+    padding: 2px;
+  }
+
+  .segmented-btn {
+    padding: 3px 6px;
+    font-size: 11px;
+  }
+
+  .settings-btn {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .brand {
+    max-width: 105px;
+  }
+
+  .brand-title {
+    font-size: 12px;
+  }
+
+  .nav-tab {
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+
+  .nav-tab svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .tab-badge {
+    min-width: 16px;
+    height: 16px;
+    font-size: 10px;
+    padding: 0 4px;
+    margin-left: 2px;
+  }
 }

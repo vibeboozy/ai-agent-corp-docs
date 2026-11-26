@@ -32,7 +32,7 @@ export class ChatTab {
     this.container.innerHTML = `
       <div class="chat-page-layout">
         <!-- Боковая панель истории диалогов -->
-        <aside class="chat-history-sidebar">
+        <aside id="chat-history-sidebar" class="chat-history-sidebar">
           <div class="history-sidebar-header">
             <button id="chat-new-dialog-btn" type="button" class="btn btn-primary btn-sm history-new-btn" title="Начать новый диалог">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -40,6 +40,12 @@ export class ChatTab {
                 <line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
               <span>Новый диалог</span>
+            </button>
+            <button id="chat-sidebar-close-btn" type="button" class="btn-icon mobile-only" title="Закрыть историю">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/>
+                <line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
             </button>
           </div>
 
@@ -50,11 +56,27 @@ export class ChatTab {
           </div>
         </aside>
 
+        <!-- Мобильная подложка (backdrop) для сайдбара -->
+        <div id="chat-sidebar-backdrop" class="sidebar-backdrop mobile-only"></div>
+
         <!-- Основная область чата -->
         <div class="chat-container">
           <!-- Шапка чата -->
           <div class="chat-header">
             <div class="chat-header-info">
+              <button id="chat-sidebar-toggle-btn" type="button" class="btn-icon mobile-only history-toggle-btn" title="История диалогов">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="3" y1="12" x2="21" y2="12"/>
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+              </button>
+              <button id="chat-mobile-new-btn" type="button" class="btn-icon mobile-only mobile-new-chat-btn" title="Новый диалог">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="12" y1="5" x2="12" y2="19"/>
+                  <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+              </button>
               <span class="chat-header-title">Консультация по регламентам</span>
               <span id="chat-session-badge" class="chat-session-badge" title="ID текущей сессии диалога"></span>
             </div>
@@ -71,7 +93,7 @@ export class ChatTab {
               <textarea
                 id="chat-textarea"
                 class="chat-textarea"
-                placeholder="Задайте вопрос по корпоративным регламентам..."
+                placeholder="Задайте вопрос по регламентам..."
                 rows="1"
               ></textarea>
               <button
@@ -134,13 +156,58 @@ export class ChatTab {
     });
 
     // Кнопка нового диалога в сайдбаре
+    const startNewChatHandler = () => {
+      store.startNewChat();
+      toastInfo('Начат новый диалог.');
+      this.closeMobileSidebar();
+      setTimeout(() => textarea.focus(), 50);
+    };
+
     if (newDialogBtn) {
-      newDialogBtn.addEventListener('click', () => {
-        store.startNewChat();
-        toastInfo('Начат новый диалог.');
-        setTimeout(() => textarea.focus(), 50);
+      newDialogBtn.addEventListener('click', startNewChatHandler);
+    }
+
+    const mobileNewBtn = this.container.querySelector('#chat-mobile-new-btn');
+    if (mobileNewBtn) {
+      mobileNewBtn.addEventListener('click', startNewChatHandler);
+    }
+
+    // Мобильное открытие/закрытие сайдбара истории
+    const sidebarToggleBtn = this.container.querySelector('#chat-sidebar-toggle-btn');
+    const sidebarCloseBtn = this.container.querySelector('#chat-sidebar-close-btn');
+    const sidebarBackdrop = this.container.querySelector('#chat-sidebar-backdrop');
+
+    if (sidebarToggleBtn) {
+      sidebarToggleBtn.addEventListener('click', () => {
+        this.openMobileSidebar();
       });
     }
+
+    if (sidebarCloseBtn) {
+      sidebarCloseBtn.addEventListener('click', () => {
+        this.closeMobileSidebar();
+      });
+    }
+
+    if (sidebarBackdrop) {
+      sidebarBackdrop.addEventListener('click', () => {
+        this.closeMobileSidebar();
+      });
+    }
+  }
+
+  openMobileSidebar() {
+    const sidebar = this.container.querySelector('#chat-history-sidebar');
+    const backdrop = this.container.querySelector('#chat-sidebar-backdrop');
+    if (sidebar) sidebar.classList.add('mobile-open');
+    if (backdrop) backdrop.classList.add('mobile-open');
+  }
+
+  closeMobileSidebar() {
+    const sidebar = this.container.querySelector('#chat-history-sidebar');
+    const backdrop = this.container.querySelector('#chat-sidebar-backdrop');
+    if (sidebar) sidebar.classList.remove('mobile-open');
+    if (backdrop) backdrop.classList.remove('mobile-open');
   }
 
   handleStateChange(newState, prevState) {
@@ -235,6 +302,7 @@ export class ChatTab {
         if (sid && sid !== store.getState().sessionId) {
           store.switchSession(sid);
         }
+        this.closeMobileSidebar();
       });
     });
   }
