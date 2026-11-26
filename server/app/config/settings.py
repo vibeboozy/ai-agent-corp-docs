@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     llm_model: str = Field(default="gpt-4.1-mini", alias="LLM_MODEL")
     llm_temperature: float = Field(default=0.2, alias="LLM_TEMPERATURE")
     llm_max_tokens: int = Field(default=1500, alias="LLM_MAX_TOKENS")
+    llm_reasoning_tokens: int = Field(default=1024, alias="LLM_REASONING_TOKENS")
     llm_timeout_s: float = Field(default=180.0, alias="LLM_TIMEOUT_S")
 
     # --- embeddings ---

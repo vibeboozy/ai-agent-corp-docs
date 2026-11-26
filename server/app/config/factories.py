@@ -56,6 +56,7 @@ def _build_llm(settings: Settings) -> Any:
         timeout_s=settings.llm_timeout_s,
         temperature=settings.llm_temperature,
         max_tokens=settings.llm_max_tokens,
+        reasoning_tokens=settings.llm_reasoning_tokens,
         allow_hosts=settings.egress_hosts(),
     )
 
