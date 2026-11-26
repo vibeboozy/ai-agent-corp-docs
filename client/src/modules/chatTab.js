@@ -485,15 +485,8 @@ export class ChatTab {
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
                 <polyline points="22 4 12 14.01 9 11.01"/>
               </svg>
-              <span>Запрос <strong>№${escapeHtml(msg.ticketId || '')}</strong> создан и отправлен в Службу качества</span>
+              <span>Запрос <strong>№${escapeHtml(msg.ticketId || '')}</strong> официально зарегистрирован и передан в Службу качества. Копия направлена вам на почту.</span>
             </div>
-            <button
-              type="button"
-              class="btn-open-ticket"
-              data-ticket-id="${escapeHtml(msg.ticketId || '')}"
-            >
-              Открыть в Кабинете СК →
-            </button>
           </div>
         `;
       } else if (msg.email_draft) {
@@ -643,18 +636,6 @@ export class ChatTab {
           btn.innerHTML = `<span>Отправить в Службу качества</span>`;
           toastError(err.message || 'Ошибка отправки тикета');
         }
-      });
-    });
-
-    // 2. Кнопка «Открыть в Кабинете СК →»
-    const openTicketBtns = this.container.querySelectorAll('.btn-open-ticket');
-    openTicketBtns.forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const ticketId = btn.getAttribute('data-ticket-id');
-        store.setState({
-          activeTab: 'quality',
-          selectedTicketId: ticketId
-        });
       });
     });
   }

@@ -436,7 +436,50 @@ export class QualityTab {
             selectedTicketId: ticket.ticket_id
           });
 
-          toastSuccess('Ответ сохранён. База знаний агента пополнена!');
+          // Добавляем официальный ответ эксперта прямо в диалог соответствующей сессии
+          const targetSessionId = ticket.session_id;
+          const allSessions = store.getState().sessions || [];
+          const sessionIndex = allSessions.findIndex((s) => s.session_id === targetSessionId);
+
+          const officerMessage = {
+            id: 'officer-reply-' + Date.now(),
+            role: 'assistant',
+            status: 'answer',
+            content: `Официальный ответ Службы качества:\n${answer}`,
+            citations: [
+              {
+                doc_name: regulation_ref,
+                section: `Подтверждено Службой качества (${ticket.ticket_id})`,
+                quote: answer
+              }
+            ],
+            timestamp: new Date().toISOString()
+          };
+
+          if (sessionIndex !== -1) {
+            const currentSessionMsgs = allSessions[sessionIndex].messages || [];
+            const newSessionMsgs = [...currentSessionMsgs, officerMessage];
+            const updatedSessions = allSessions.map((s, idx) => {
+              if (idx === sessionIndex) {
+                return {
+                  ...s,
+                  messages: newSessionMsgs,
+                  updated_at: new Date().toISOString()
+                };
+              }
+              return s;
+            });
+
+            store.setState({ sessions: updatedSessions });
+            localStorage.setItem('sq_agent_sessions', JSON.stringify(updatedSessions));
+
+            // Если эта сессия сейчас активна в чате, обновляем и текущий экран чата
+            if (store.getState().sessionId === targetSessionId) {
+              store.setState({ chatMessages: newSessionMsgs });
+            }
+          }
+
+          toastSuccess('Ответ сохранён. База знаний пополнена, ответ добавлен в чат!');
         } catch (err) {
           submitBtn.disabled = false;
           submitBtn.innerHTML = `<span>Сохранить ответ и пополнить базу знаний</span>`;
