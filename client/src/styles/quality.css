@@ -1,0 +1,466 @@
+@charset "UTF-8";
+
+/* Кабинет Службы качества: строгий корпоративный стиль Enterprise CRM */
+.quality-container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  background-color: var(--color-bg);
+  overflow: hidden;
+}
+
+/* Верхняя служебная панель фильтрации заявок */
+.quality-toolbar {
+  height: 44px;
+  padding: 0 16px;
+  background-color: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: 12px;
+}
+
+.quality-filters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filter-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.filter-btn:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-main);
+}
+
+.filter-btn.active {
+  background-color: var(--color-surface-hover);
+  border-color: var(--color-border);
+  color: var(--color-text-main);
+  font-weight: var(--font-weight-semibold);
+}
+
+.filter-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: var(--font-weight-bold);
+  background-color: var(--color-surface-hover);
+  border: 1px solid var(--color-border-subtle);
+  color: var(--color-text-secondary);
+}
+
+.filter-btn.active .filter-count {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+  color: var(--color-text-inverted);
+}
+
+/* Master-Detail раскладка */
+.quality-layout {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Левая колонка: служебная очередь заявок (Service Desk queue) */
+.quality-sidebar {
+  width: 340px;
+  min-width: 280px;
+  max-width: 400px;
+  border-right: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.ticket-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.ticket-card {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  cursor: pointer;
+  background-color: var(--color-surface);
+  transition: background-color var(--transition-fast);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+}
+
+.ticket-card:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.ticket-card.active {
+  background-color: var(--color-surface-hover);
+  border-left: 3px solid var(--color-primary);
+  padding-left: 11px;
+}
+
+.ticket-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Моноширинный служебный код SQ-XXX */
+.ticket-id {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-primary);
+  letter-spacing: 0.04em;
+}
+
+.ticket-card-title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-main);
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ticket-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.ticket-empty-list {
+  padding: 36px 16px;
+  text-align: center;
+  color: var(--color-text-muted);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+}
+
+/* Правая колонка: детали заявки и CRM-форма эталонного ответа */
+.quality-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px;
+  background-color: var(--color-bg);
+  display: flex;
+  flex-direction: column;
+}
+
+.ticket-detail-view-wrapper {
+  width: 100%;
+}
+
+.ticket-detail-view {
+  max-width: 860px;
+  width: 100%;
+  margin: 0 auto;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow-xs);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ticket-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ticket-detail-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ticket-detail-id {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-main);
+  letter-spacing: 0.02em;
+}
+
+.ticket-detail-date {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+/* Секция вопроса сотрудника */
+.ticket-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ticket-section-title {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-bold);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
+}
+
+.ticket-question-text {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-normal);
+  color: var(--color-text-main);
+  background-color: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+/* Контекст и сформированное письмо обращения */
+.ticket-context-accordion {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-subtle);
+  overflow: hidden;
+}
+
+.ticket-context-summary {
+  padding: 8px 12px;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  background-color: #EAEFF4;
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: background-color var(--transition-fast);
+}
+
+.ticket-context-summary:hover {
+  background-color: #E2E8F0;
+  color: var(--color-text-main);
+}
+
+.ticket-context-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  background-color: var(--color-surface);
+}
+
+.context-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.context-label {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.context-val {
+  padding: 6px 10px;
+  background-color: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-main);
+}
+
+/* Форма добавления эталонного ответа в стиле внутренней CRM */
+.resolve-form-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-top: 3px solid var(--color-primary);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-xs);
+}
+
+.resolve-form-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-main);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resolve-form-title svg {
+  color: var(--color-primary);
+}
+
+.resolve-textarea {
+  min-height: 100px;
+  resize: vertical;
+  font-size: var(--font-size-base);
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+/* Карточка эталонного ответа в базе знаний */
+.resolved-info-box {
+  padding: 16px;
+  background-color: var(--color-surface-subtle);
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-status-answer);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.resolved-badge-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.resolved-title {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-status-answer);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.resolved-answer-text {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-main);
+  white-space: pre-wrap;
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+
+.resolved-regulation-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.resolved-ref-badge {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-status-answer);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  padding: 2px 8px;
+  border-radius: var(--radius-xs);
+}
+
+/* Заглушка, когда обращение не выбрано */
+.ticket-detail-placeholder {
+  margin: auto;
+  text-align: center;
+  color: var(--color-text-secondary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 40px 20px;
+}
+
+.placeholder-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Адаптивность для компактных экранов */
+@media (max-width: 900px) {
+  .quality-layout {
+    flex-direction: column;
+  }
+  .quality-sidebar {
+    width: 100%;
+    max-width: 100%;
+    min-width: 100%;
+    max-height: 260px;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+  }
+  .quality-content {
+    padding: 14px;
+  }
+  .ticket-detail-view {
+    padding: 14px;
+  }
+}
+
+/* Адаптивность для 2K / 4K мониторов */
+@media (min-width: 1800px) {
+  .quality-sidebar {
+    width: 380px;
+    max-width: 440px;
+  }
+  .ticket-detail-view {
+    max-width: 1020px;
+  }
+}

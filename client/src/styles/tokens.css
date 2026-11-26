@@ -1,0 +1,103 @@
+@charset "UTF-8";
+
+:root {
+  /* Корпоративная цветовая палитра компании */
+  --color-primary: #A50F2D;          /* Основной бренд-цвет */
+  --color-primary-hover: #BE042F;    /* Акцентный цвет */
+  --color-primary-active: #880B24;
+  --color-primary-light: #FDF2F4;
+  --color-primary-subtle: #F5D5DC;
+
+  --color-accent: #BE042F;           /* Акцент */
+  --color-accent-hover: #FF5268;     /* Ховер акцента */
+
+  /* Нейтральные цвета (Enterprise / Linear / Shadcn UI) */
+  --color-bg: #F8FAFC;               /* Фон страницы */
+  --color-surface: #FFFFFF;          /* Поверхность */
+  --color-surface-hover: #F2F5F8;    /* Ховер элементов */
+  --color-surface-active: #E8EEF3;
+  --color-surface-subtle: #F2F5F8;   /* Фон секций и карточек */
+
+  --color-border: #D2DCE5;           /* Границы (Серо-голубой) */
+  --color-border-subtle: #E2E8F0;    /* Тонкие субтильные границы */
+  --color-border-focus: #A50F2D;     /* Фокус инпутов */
+
+  --color-text-main: #212424;        /* Графитовый основной текст */
+  --color-text-secondary: #697279;   /* Вторичный текст */
+  --color-text-muted: #697279;       /* Приглушенный текст */
+  --color-text-subtle: #8E98A0;      /* Подсказки и плейсхолдеры */
+  --color-text-inverted: #FFFFFF;
+
+  /* Статусы бизнес-сценариев */
+  /* Кейс 1: Зеленый - Подтверждено регламентом */
+  --color-status-answer: #0F766E;
+  --color-status-answer-bg: #F0FDF4;
+  --color-status-answer-border: #BBF7D0;
+  --color-status-answer-hover: #115E59;
+
+  /* Кейс 2: Янтарный/Желтый - Требуется уточнение */
+  --color-status-clarify: #B45309;
+  --color-status-clarify-bg: #FFFBEB;
+  --color-status-clarify-border: #FDE68A;
+  --color-status-clarify-hover: #92400E;
+
+  /* Кейс 3: Оранжево-красный - Эскалация / Нет в регламентах */
+  --color-status-escalate: #BE042F;
+  --color-status-escalate-bg: #FDF2F4;
+  --color-status-escalate-border: #F5D5DC;
+  --color-status-escalate-hover: #880B24;
+
+  /* Красный индикатор бейджа */
+  --color-badge: #BE042F;
+  --color-badge-text: #FFFFFF;
+
+  /* Ошибки и предупреждения */
+  --color-danger: #BE042F;
+  --color-danger-bg: #FDF2F4;
+  --color-danger-border: #F5D5DC;
+
+  /* Типографика - комфортный enterprise-размер шрифтов */
+  --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, Monaco, monospace;
+  --font-size-xs: 0.75rem;     /* 12px */
+  --font-size-sm: 0.8125rem;   /* 13px */
+  --font-size-base: 0.875rem;  /* 14px */
+  --font-size-md: 0.9375rem;   /* 15px */
+  --font-size-lg: 1.0625rem;   /* 17px */
+  --font-size-xl: 1.25rem;     /* 20px */
+  --font-size-2xl: 1.5rem;     /* 24px */
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.6;
+
+  /* Радиусы скругления (Linear / Shadcn UI: 4-6px) */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
+  --radius-full: 9999px;
+
+  /* Тени (тонкие субтильные границы, минимальные плоские тени) */
+  --shadow-xs: 0 1px 2px 0 rgba(33, 36, 36, 0.03);
+  --shadow-sm: 0 1px 2px 0 rgba(33, 36, 36, 0.05);
+  --shadow-md: 0 2px 4px -1px rgba(33, 36, 36, 0.06);
+  --shadow-lg: 0 4px 12px -2px rgba(33, 36, 36, 0.08);
+  --shadow-popover: 0 4px 16px rgba(33, 36, 36, 0.12), 0 0 0 1px rgba(210, 220, 229, 0.6);
+
+  /* Анимации и переходы */
+  --transition-fast: 120ms ease;
+  --transition-base: 180ms ease;
+  --transition-slow: 240ms ease;
+
+  /* Слои z-index */
+  --z-header: 50;
+  --z-popover: 100;
+  --z-toast: 1000;
+}
