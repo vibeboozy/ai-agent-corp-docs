@@ -23,8 +23,15 @@ import httpx
 from app.adapters.llm.port import LLMClient
 from app.domain.errors import AppError, UpstreamTimeoutError
 
-_THINK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+# Common CoT wrappers; also drop unclosed <think>… tails.
+_THINK_RE = re.compile(
+    r"<think>.*?</think>|<thinking>.*?</thinking>|"
+    r"<think>.*$|<thinking>.*$",
+    re.IGNORECASE | re.DOTALL,
+)
 _LABELS = ("underspecified", "ambiguous", "specific")
+# When several labels appear in leftover prose, prefer answering over clarifying.
+_LABEL_PREFERENCE = ("specific", "ambiguous", "underspecified")
 
 
 def strip_think_blocks(text: str) -> str:
@@ -38,17 +45,26 @@ def parse_specificity_label(raw: str) -> str:
 
     Strips <think> blocks first so reasoning that mentions 'underspecified'
     cannot override the final token (API clarifying vs direct-answer bug).
+
+    If multiple labels remain in cleaned text, prefer the *last* mention
+    (models often reason then conclude); ties broken toward `specific`.
     """
     cleaned = strip_think_blocks(raw).lower()
-    # Prefer an exact single-token / first-line match.
-    first = cleaned.splitlines()[0].strip() if cleaned else ""
-    token = first.split()[0].strip(".,;:\"'`") if first else ""
-    if token in _LABELS:
-        return token
+    lines = [ln.strip() for ln in cleaned.splitlines() if ln.strip()]
+    # Bare single-line label (e.g. "specific" / "Underspecified.").
+    if len(lines) == 1:
+        token = lines[0].split()[0].strip(".,;:\"'`")
+        if token in _LABELS and len(lines[0].split()) <= 2:
+            return token
+    matches: list[tuple[int, str]] = []
     for label in _LABELS:
-        if re.search(rf"\b{label}\b", cleaned):
-            return label
-    return "specific"
+        for m in re.finditer(rf"\b{label}\b", cleaned):
+            matches.append((m.start(), label))
+    if not matches:
+        return "specific"
+    # Last mention wins (final answer after reasoning); prefer specific on ties.
+    matches.sort(key=lambda item: (item[0], -_LABEL_PREFERENCE.index(item[1])))
+    return matches[-1][1]
 
 
 class HttpLLMClient:
@@ -142,7 +158,18 @@ class HttpLLMClient:
     ) -> str:
         hist = "\n".join(history or [])
         prompt = (
-            "Classify the user question as one of: underspecified, ambiguous, specific. "
+            "Classify the user question as one of: underspecified, ambiguous, specific.\n"
+            "Rules:\n"
+            "- specific: asks who/what for a concrete role+topic "
+            "(e.g. кто отвечает за организацию отчётности по проекту, "
+            "кто подписывает договоры на закупку). Prefer specific when both "
+            "a role-seeking cue and a concrete topic are present.\n"
+            "- ambiguous: could map to two+ distinct regulation scopes "
+            "(e.g. кто подписывает договоры — закупка vs подряд).\n"
+            "- underspecified: missing topic or too vague to retrieve "
+            "(e.g. кто отвечает за организацию?).\n"
+            "Use History: a short clarification that completes a prior role+topic "
+            "question is specific.\n"
             "Reply with only that single token.\n"
             f"History:\n{hist}\nQuestion:\n{user_message}"
         )

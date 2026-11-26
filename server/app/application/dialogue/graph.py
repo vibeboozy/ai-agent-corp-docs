@@ -23,6 +23,14 @@ from app.application.dialogue.state import DialogueState
 def _route_after_assess(
     state: DialogueState,
 ) -> Literal["clarify", "retrieve"]:
+    """
+    specific → retrieve (then ground/answer or escalate).
+    underspecified|ambiguous → clarify (no retrieval yet).
+
+    Assess applies prefer_specific_label so role+topic questions reach retrieve
+    even when the raw LLM label was timid. Empty retrieval / RERANK_MIN_SCORE
+    wiping hits escalates in ground — it must not loop clarify.
+    """
     specificity = state.get("specificity") or "underspecified"
     if specificity in ("underspecified", "ambiguous"):
         return "clarify"
