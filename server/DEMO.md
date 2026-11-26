@@ -21,7 +21,7 @@ Connectivity: `rag-server check` (or `python -m app.cli check`) — expect `over
 
 ```bash
 curl -s http://127.0.0.1:8000/api/v1/appeals -H 'Content-Type: application/json' \
-  -d '{"message":{"content":"Кто подписывает договоры на закупку?"}}' | python3 -m json.tool
+  -d '{"message":{"content":"Кто отвечает за организацию отчётности по проекту?"}}' | python3 -m json.tool
 ```
 
 Expect: `status=answered`, assistant `message_kind=answer` with non-empty `citations`
@@ -32,12 +32,12 @@ Expect: `status=answered`, assistant `message_kind=answer` with non-empty `citat
 ```bash
 # ambiguous first turn
 curl -s http://127.0.0.1:8000/api/v1/appeals -H 'Content-Type: application/json' \
-  -d '{"message":{"content":"Кто подписывает договоры?"}}' | python3 -m json.tool
+  -d '{"message":{"content":"Кто отвечает за организацию?"}}' | python3 -m json.tool
 
 # then POST /appeals/{id}/messages — body is {"content":"..."} (not nested)
 curl -s http://127.0.0.1:8000/api/v1/appeals/APPEAL_ID/messages \
   -H 'Content-Type: application/json' \
-  -d '{"content":"Это про договоры на закупку товаров."}' | python3 -m json.tool
+  -d '{"content":"Это про отчётность по проекту."}' | python3 -m json.tool
 ```
 
 Expect: first turn `clarifying`; after clarification `answered` + citations.

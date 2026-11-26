@@ -32,6 +32,19 @@ def test_parse_specificity_exact_token() -> None:
     assert parse_specificity_label("Underspecified.") == "underspecified"
 
 
+def test_parse_specificity_prefers_last_label_over_underspecified_bias() -> None:
+    # Without think tags, models often mention underspecified while reasoning then
+    # conclude specific — old scan returned the first match (underspecified).
+    raw = (
+        "Could be underspecified if org alone, but role and topic are clear → specific"
+    )
+    assert parse_specificity_label(raw) == "specific"
+
+
+def test_parse_specificity_prefers_specific_when_both_present_last() -> None:
+    assert parse_specificity_label("underspecified\nspecific") == "specific"
+
+
 @pytest.mark.asyncio
 async def test_http_classify_uses_strip_path(monkeypatch: pytest.MonkeyPatch) -> None:
     client = HttpLLMClient(

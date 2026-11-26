@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.conftest import live_enabled
+from tests.conftest import env_flag
 
 
 def test_health_dependencies_endpoint_shape(client: TestClient) -> None:
@@ -27,10 +27,10 @@ def test_health_dependencies_endpoint_shape(client: TestClient) -> None:
 
 @pytest.mark.integration
 @pytest.mark.skipif(
-    not live_enabled("RUN_LIVE_TESTS"),
+    not env_flag("RUN_LIVE_TESTS"),
     reason="RUN_LIVE_TESTS not set",
 )
-def test_health_dependencies_all_ok_when_live(client: TestClient) -> None:
+def test_health_dependencies_all_ok(client: TestClient) -> None:
     resp = client.get("/health/dependencies")
     assert resp.status_code == 200
     body = resp.json()

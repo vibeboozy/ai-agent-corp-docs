@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from app.adapters.llm.port import LLMClient
+from app.application.dialogue.specificity import prefer_specific_label
 from app.application.dialogue.state import DialogueState
 from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
@@ -46,16 +47,21 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
 
     async def assess_specificity(state: DialogueState) -> DialogueState:
         t0 = time.perf_counter()
-        label = await deps.llm.classify_specificity(
-            state.get("user_message", ""),
-            history=list(state.get("history") or []),
-        )
+        user_message = state.get("user_message", "") or ""
+        history = list(state.get("history") or [])
+        raw_label = await deps.llm.classify_specificity(user_message, history=history)
+        # Conservative: role+topic questions must retrieve (not clarify), even when
+        # the LLM timidly returns underspecified/ambiguous.
+        label = prefer_specific_label(raw_label, user_message, history)
         assess_ms = round((time.perf_counter() - t0) * 1000, 2)
+        trace = f"assess:{label}"
+        if label != raw_label:
+            trace = f"assess:{label}(was:{raw_label})"
         return {
             **state,
             "specificity": label,
             "latency_ms": _merge_latency(state, llm_assess_ms=assess_ms),
-            "node_trace": _trace(state, f"assess:{label}"),
+            "node_trace": _trace(state, trace),
         }
 
     async def clarify(state: DialogueState) -> DialogueState:

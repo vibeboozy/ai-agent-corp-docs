@@ -31,7 +31,7 @@ def client() -> TestClient:
         yield c
 
 
-def live_enabled(*flags: str) -> bool:
-    """True only when every named RUN_LIVE_* env is truthy."""
+def env_flag(*flags: str) -> bool:
+    """True when every named env var is truthy (1/true/yes/on)."""
     truthy = {"1", "true", "yes", "on"}
     return all(os.getenv(f, "0").lower() in truthy for f in flags)

@@ -8,12 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import live_enabled
+from tests.conftest import env_flag
 
 pytestmark = pytest.mark.integration
 
 
-@pytest.mark.skipif(not live_enabled("RUN_LIVE_POSTGRES"), reason="RUN_LIVE_POSTGRES not set")
+@pytest.mark.skipif(not env_flag("RUN_LIVE_POSTGRES"), reason="RUN_LIVE_POSTGRES not set")
 @pytest.mark.asyncio
 async def test_live_postgres_ping() -> None:
     from app.config.factories import build_container
@@ -25,7 +25,7 @@ async def test_live_postgres_ping() -> None:
     assert await container.persistence.ping() is True
 
 
-@pytest.mark.skipif(not live_enabled("RUN_LIVE_LLM"), reason="RUN_LIVE_LLM not set")
+@pytest.mark.skipif(not env_flag("RUN_LIVE_LLM"), reason="RUN_LIVE_LLM not set")
 @pytest.mark.asyncio
 async def test_live_llm_complete() -> None:
     from app.config.factories import build_container
@@ -37,7 +37,7 @@ async def test_live_llm_complete() -> None:
     assert isinstance(text, str) and text
 
 
-@pytest.mark.skipif(not live_enabled("RUN_LIVE_QDRANT"), reason="RUN_LIVE_QDRANT not set")
+@pytest.mark.skipif(not env_flag("RUN_LIVE_QDRANT"), reason="RUN_LIVE_QDRANT not set")
 @pytest.mark.asyncio
 async def test_live_qdrant_ensure_and_roundtrip() -> None:
     from app.config.factories import build_container
@@ -64,7 +64,7 @@ async def test_live_qdrant_ensure_and_roundtrip() -> None:
     assert isinstance(hits, list)
 
 
-@pytest.mark.skipif(not live_enabled("RUN_LIVE_DOCLING"), reason="RUN_LIVE_DOCLING not set")
+@pytest.mark.skipif(not env_flag("RUN_LIVE_DOCLING"), reason="RUN_LIVE_DOCLING not set")
 @pytest.mark.asyncio
 async def test_live_docling_text_convert() -> None:
     from app.config.factories import build_container
@@ -77,7 +77,7 @@ async def test_live_docling_text_convert() -> None:
 
 
 @pytest.mark.e2e
-@pytest.mark.skipif(not live_enabled("RUN_LIVE_E2E"), reason="RUN_LIVE_E2E not set")
+@pytest.mark.skipif(not env_flag("RUN_LIVE_E2E"), reason="RUN_LIVE_E2E not set")
 @pytest.mark.asyncio
 async def test_live_e2e_appeal_roundtrip() -> None:
     """Smoke: create appeal with first message against live stack; assert response shape."""
