@@ -79,8 +79,10 @@ rag-server ingest-docx /path/to/reg.docx --title "Procurement"
 ### 5. Abbreviation glossary
 
 Built-in corporate abbreviations (РП, АМ, ТЗ, …) expand queries before hybrid
-search and can enrich ingest chunk metadata. Configure via `ABBREVIATION_*` in
-`.env.example` (`ABBREVIATION_GLOSSARY`, `ABBREVIATION_GLOSSARY_PATH`,
+search and, on ingest, append expansions into chunk **text** (e.g.
+`РП (Руководитель проекта)`) before dense/sparse embed, plus optional
+`metadata.abbreviations`. Configure via `ABBREVIATION_*` in `.env.example`
+(`ABBREVIATION_GLOSSARY`, `ABBREVIATION_GLOSSARY_PATH`,
 `ABBREVIATION_EXPAND_QUERY`, `ABBREVIATION_ENRICH_INGEST`).
 
 ### 6. Tests

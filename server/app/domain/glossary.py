@@ -4,7 +4,7 @@ PURPOSE: Configurable abbreviation glossary for query expansion + ingest metadat
 Dependencies: re; Settings ABBREVIATION_*
 DO:
 - Expand query abbreviations before hybrid retrieval
-- Optionally tag chunks with matched abbreviations at ingest
+- Enrich ingest chunk TEXT (and metadata) so dense/sparse embeddings see expansions
 DONT:
 - Invent expansions not in the configured glossary
 """
@@ -150,22 +150,40 @@ class AbbreviationGlossary:
                     break
         return found
 
-    def expand(self, text: str) -> str:
-        """
-        Append expansions for abbreviations found in text (query expansion).
-
-        Original text is preserved; expansions are appended so sparse/dense
-        both see the full form.
-        """
-        if not self.expand_query or not text:
-            return text
+    def _append_expansions(self, text: str) -> str:
+        """Append `ABBR (expansion)` for matches not already spelled out in text."""
         matches = self.find_matches(text)
         if not matches:
             return text
-        extras = [f"{abbr} ({exp})" for abbr, exp in matches.items() if exp.lower() not in text.lower()]
+        extras = [
+            f"{abbr} ({exp})"
+            for abbr, exp in matches.items()
+            if exp.lower() not in text.lower()
+        ]
         if not extras:
             return text
         return f"{text} " + " ".join(extras)
+
+    def expand(self, text: str) -> str:
+        """
+        Query expansion: append expansions so hybrid search sees full forms.
+
+        Gated by `expand_query` (ABBREVIATION_EXPAND_QUERY).
+        """
+        if not self.expand_query or not text:
+            return text
+        return self._append_expansions(text)
+
+    def enrich_text(self, text: str) -> str:
+        """
+        Ingest text enrichment: same append form as query expand.
+
+        Mutates the chunk string before dense/sparse embed so Qdrant vectors
+        include expansions. Gated by `enrich_ingest` (ABBREVIATION_ENRICH_INGEST).
+        """
+        if not self.enrich_ingest or not text:
+            return text
+        return self._append_expansions(text)
 
     def enrich_metadata(self, text: str, metadata: dict | None = None) -> dict:
         """Optionally attach matched abbreviations to chunk metadata."""

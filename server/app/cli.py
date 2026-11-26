@@ -66,12 +66,19 @@ async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
         print("error: Docling returned no chunks", file=sys.stderr)
         return 1
     title = document_title or src.stem
-    texts = [c["text"] for c in chunks]
+    glossary = getattr(container, "glossary", None)
+    # Expand abbreviations into chunk TEXT before embed (dense + sparse).
+    enriched = []
+    for chunk in chunks:
+        body = str(chunk.get("text") or "")
+        if glossary is not None:
+            body = glossary.enrich_text(body)
+        enriched.append({**chunk, "text": body})
+    texts = [c["text"] for c in enriched]
     vectors = await container.embeddings.embed_dense(texts)
     sparse_maps = await container.embeddings.embed_sparse(texts)
-    glossary = getattr(container, "glossary", None)
     upserts = []
-    for idx, chunk in enumerate(chunks):
+    for idx, chunk in enumerate(enriched):
         meta: dict = {"source_path": str(src)}
         if chunk.get("section_title"):
             meta["section_title"] = chunk["section_title"]

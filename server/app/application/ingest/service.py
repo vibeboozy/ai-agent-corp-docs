@@ -49,11 +49,18 @@ class IngestService:
         doc_id = document_id or f"learned-{job_id[:8]}"
         converted = await self._docling.convert(text=text)
         raw_chunks = converted.get("chunks") or [{"chunk_id": f"c-{job_id[:8]}", "text": text}]
-        texts = [c["text"] for c in raw_chunks]
+        # Expand abbreviations into chunk TEXT before embed so dense/sparse see them.
+        enriched_chunks: list[dict[str, Any]] = []
+        for chunk in raw_chunks:
+            body = str(chunk.get("text") or "")
+            if self._glossary is not None:
+                body = self._glossary.enrich_text(body)
+            enriched_chunks.append({**chunk, "text": body})
+        texts = [c["text"] for c in enriched_chunks]
         vectors = await self._embeddings.embed_dense(texts)
         sparse_maps = await self._embeddings.embed_sparse(texts)
         upserts = []
-        for idx, chunk in enumerate(raw_chunks):
+        for idx, chunk in enumerate(enriched_chunks):
             chunk_id = chunk.get("chunk_id") or f"c-{uuid4().hex[:8]}"
             dense = vectors[idx] if idx < len(vectors) else None
             sparse = sparse_maps[idx] if idx < len(sparse_maps) else None
