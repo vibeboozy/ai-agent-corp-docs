@@ -20,8 +20,29 @@ from typing import Any
 from app.adapters.embeddings.port import EmbeddingsClient
 from app.adapters.llm.port import LLMClient
 from app.adapters.vectorstore.port import VectorStore
-from app.application.text_util import lexical_overlap
+from app.application.text_util import lexical_overlap, lexical_relevance
 from app.domain.glossary import AbbreviationGlossary
+
+# WHO + purchase — «Кто подписывает договоры на закупку?» (GS-02).
+_PURCHASE_WHO_RE = re.compile(
+    r"(?iu)\bкто\b.{0,100}?\b(?:подписыва\w*|заключа\w*).{0,60}?\bзакупк"
+    r"|\bзакупк\w*.{0,40}?\b(?:подписыва\w*|заключа\w*)"
+)
+# Synonyms so hybrid search can surface п.9.5 (no literal «закупку» / «подписывает»).
+_PURCHASE_WHO_EXPAND = (
+    " субподрядные договоры заключаются от юридических лиц Компании "
+    "подписание договора на закупку"
+)
+_PURCHASE_AGENCY_HIT_RE = re.compile(
+    r"(?iu)(?:субподрядн|закупк|юридическ\w*\s+лиц|"
+    r"заключа(?:ются|ется)\s+от)"
+)
+_PURCHASE_NOISE_HIT_RE = re.compile(
+    r"(?iu)(?:\bдс\b|дополнительн\w*\s+соглашен|"
+    r"сроки?\s+подписан|планов\w*\s+дат\w*\s+подписан|"
+    r"подписан\w*\s+дс|подписыва\w*\s+дс|"
+    r"ам\s*/\s*менеджер.{0,60}подписыва)"
+)
 
 
 @dataclass
@@ -67,10 +88,18 @@ class RetrievalService:
         self._glossary = glossary
         self._lexical_weight = max(0.0, min(1.0, float(lexical_weight)))
 
+    @staticmethod
+    def _is_purchase_who(query: str) -> bool:
+        return bool(_PURCHASE_WHO_RE.search(query or ""))
+
     def _expand_query(self, query: str) -> str:
-        if self._glossary is None:
-            return query
-        return self._glossary.expand(query)
+        expanded = query
+        if self._glossary is not None:
+            expanded = self._glossary.expand(query)
+        # Deterministic synonym expand so п.9.5 can enter the hybrid pool.
+        if self._is_purchase_who(query):
+            expanded = f"{expanded}{_PURCHASE_WHO_EXPAND}"
+        return expanded
 
     def _prefer_sort(self, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not self._prefer_latest:
@@ -96,28 +125,60 @@ class RetrievalService:
 
     def _blend_lexical(self, query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Re-rank with vector score + lexical overlap; demote irrelevant mid-chunk hits.
+        Re-rank with vector score + prefix-aware lexical relevance.
+
+        Uses lexical_relevance (RU morphology prefixes) so near-identical questions
+        with different word forms still boost the matching clause. Exact Jaccard
+        overlap alone under-counted Russian morphology and demoted good hits.
 
         Preserves `vector_score` (raw) for min_score gating. Combined `score` is used
         only for ordering — never invents a perfect 1.0 from a lone weak hit.
+
+        Purchase WHO (GS-02): boost subcontract/agency clauses; demote DS/timing
+        signing neighbors so п.9.5 can surface without flaky LLM rerank.
         """
         if not hits:
             return hits
         w = self._lexical_weight
+        purchase_who = self._is_purchase_who(query)
         blended: list[dict[str, Any]] = []
-        max_vec = max(float(h.get("score") or 0.0) for h in hits) or 1.0
+        # Prefer preserved raw vector_score on re-blend (after LLM nudge).
+        max_vec = max(
+            float(h.get("vector_score", h.get("score")) or 0.0) for h in hits
+        ) or 1.0
         for hit in hits:
             h = dict(hit)
-            raw = float(h.get("score") or 0.0)
+            if h.get("vector_score") is not None:
+                raw = float(h.get("vector_score") or 0.0)
+            else:
+                raw = float(h.get("score") or 0.0)
             h["vector_score"] = raw
             vec_n = raw / max_vec
-            lex = lexical_overlap(query, str(h.get("text") or ""))
+            text = str(h.get("text") or "")
+            # Prefer morphology-aware relevance; keep exact overlap as a floor signal.
+            lex = max(lexical_relevance(query, text), lexical_overlap(query, text))
             locator = str(h.get("locator") or h.get("section_title") or "")
-            if locator and lexical_overlap(query, locator) > 0:
+            if locator and (
+                lexical_relevance(query, locator) > 0 or lexical_overlap(query, locator) > 0
+            ):
                 lex = min(1.0, lex + 0.25)
+            if purchase_who and _PURCHASE_AGENCY_HIT_RE.search(text):
+                # «субподрядные… заключаются от юридических лиц» lacks «закупку».
+                lex = min(1.0, max(lex, 0.55) + 0.35)
             h["lexical_score"] = lex
             # Demote high-vector / low-lexical mid-chunk noise (e.g. §17 vs §7.2).
             rank = (1.0 - w) * vec_n * (0.2 + 0.8 * max(lex, 0.05)) + w * lex
+            # Demote context-poor HybridChunker orphans / checklist bullets.
+            n_tok = len(text.split())
+            if n_tok and n_tok < 8:
+                rank *= 0.5
+            elif n_tok < 14:
+                rank *= 0.85
+            if purchase_who:
+                if _PURCHASE_AGENCY_HIT_RE.search(text):
+                    rank *= 2.2
+                elif _PURCHASE_NOISE_HIT_RE.search(text):
+                    rank *= 0.25
             h["rank_score"] = rank
             # Exposed score tracks rank (audits/citations) while vector_score stays raw.
             h["score"] = rank
@@ -196,7 +257,12 @@ class RetrievalService:
         hits = self._prefer_sort(hits)
 
         rerank_ms = 0.0
-        if self._rerank_mode == "llm":
+        # Purchase WHO: skip LLM rerank (flaky / temp variance); keep deterministic blend.
+        use_llm_rerank = self._rerank_mode == "llm" and not self._is_purchase_who(query)
+        effective_mode = self._rerank_mode
+        if self._rerank_mode == "llm" and not use_llm_rerank:
+            effective_mode = "none+purchase_who"
+        if use_llm_rerank:
             pool = hits[: self._rerank_candidates]
             t2 = time.perf_counter()
             hits = await self._llm_rerank(expanded, pool)
@@ -216,7 +282,7 @@ class RetrievalService:
             "embed_ms": embed_ms,
             "search_ms": search_ms,
         }
-        if self._rerank_mode == "llm":
+        if use_llm_rerank:
             latency["rerank_ms"] = rerank_ms
         scores = [
             {
@@ -229,7 +295,7 @@ class RetrievalService:
         ]
         return RetrievalResult(
             hits=final,
-            rerank_mode=self._rerank_mode,
+            rerank_mode=effective_mode,
             latency_ms=latency,
             rerank_scores=scores,
             expanded_query=expanded if expanded != query else None,

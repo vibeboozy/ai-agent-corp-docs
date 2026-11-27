@@ -29,9 +29,12 @@ _OFF_TOPIC_RE = re.compile(
     r"сколько\s+(?:сейчас\s+)?времени"
     r"|который\s+час"
     r"|какое\s+(?:сегодня\s+)?(?:число|день)"
-    r"|какая\s+(?:сегодня\s+)?погода"
+    # «Какая погода?» / «Какая сегодня погода в Москве?»
+    r"|какая\s+(?:сегодня\s+)?погода(?:\s+\S+){0,4}"
     r"|расскажи\s+(?:анекдот|шутку|о\s+себе)"
     r"|как\s+дела"
+    # Cooking / lifestyle out of regs (golden GS-15).
+    r"|как\s+приготовить\s+\S+"
     r"|привет(?:\s*,?\s*как\s+дела)?"
     r"|hello|hi\b|hey\b"
     r"|who\s+are\s+you"
@@ -41,6 +44,16 @@ _OFF_TOPIC_RE = re.compile(
     r"|спой\s+песн"
     r"|нарисуй"
     r")\s*[?.!]?\s*$"
+)
+
+# Named external legal corpora — refuse unless listed in ALLOWED_TOPICS extras.
+_EXTERNAL_CORPUS_RE = re.compile(
+    r"(?iu)\b(?:"
+    r"конституци\w*"
+    r"|трудов(?:ой|ого|ому|ым)\s+кодекс\w*"
+    r"|гражданск\w*\s+кодекс\w*"
+    r"|уголовн\w*\s+кодекс\w*"
+    r")\b"
 )
 
 # Soft cues that still look like corporate regulation when combined with process nouns —
@@ -69,10 +82,29 @@ def is_supported_domain(
     msg = _normalize(user_message)
     if not msg:
         return False
+    topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
+    # External corpora only count as in-domain when listed in ALLOWED_TOPICS.
+    if _EXTERNAL_CORPUS_RE.search(msg):
+        return mentions_allowed_topic(msg, topics)
     if _REGULATION_CUE_RE.search(msg):
         return True
-    topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
     return mentions_allowed_topic(msg, list(topics))
+
+
+def names_disallowed_external_topic(
+    user_message: str,
+    allowed_topics: Sequence[AllowedTopic] | None = None,
+) -> bool:
+    """
+    True when the ask names Конституция/кодексы that are *not* in ALLOWED_TOPICS.
+
+    Default corporate-only allowlist → Конституция РФ is off-topic (GS-16).
+    """
+    msg = _normalize(user_message)
+    if not msg or not _EXTERNAL_CORPUS_RE.search(msg):
+        return False
+    topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
+    return not mentions_allowed_topic(msg, topics)
 
 
 def is_off_topic(
@@ -87,13 +119,18 @@ def is_off_topic(
     History is ignored for detection — off-topic is judged on the current message.
     Messages that clearly name a regulation process or allowed topic are never refused here.
     Clear chitchat patterns (weather/time/jokes) stay refused even if ALLOWED_TOPICS is set.
+    Named external corpora (Конституция / кодексы) refuse unless in ALLOWED_TOPICS.
     """
     _ = history
     msg = _normalize(user_message)
     if not msg:
         return False
+    topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
     # In-domain cues win over bare chitchat patterns (e.g. time windows in processes).
-    if is_supported_domain(msg, allowed_topics=allowed_topics):
+    if is_supported_domain(msg, allowed_topics=topics):
         return False
+    # Конституция / ТК / etc. without ALLOWED_TOPICS → refuse (do not retrieve junk regs).
+    if names_disallowed_external_topic(msg, allowed_topics=topics):
+        return True
     # Explicit chitchat → refuse before retrieve (retrieval gate).
     return bool(_OFF_TOPIC_RE.match(msg))

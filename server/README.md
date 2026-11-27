@@ -113,6 +113,21 @@ pytest -m e2e            # full appeal path when core stack is up
 rag-server check
 ```
 
+### 7b. Local golden scenario runner (paste log)
+
+Live read-only dialogue against your `.env` stack (LLM + embeddings + existing
+Qdrant collection). Does **not** upsert Qdrant or create Postgres appeals.
+
+```bash
+cd server
+# .env configured; corpus already ingested
+python scripts/run_golden_scenarios.py
+# optional: --only GS-01,GS-02  --out artifacts/golden-run.log
+```
+
+Scenarios: `scenarios/golden-set.yaml` (GS-01…16).  
+**Paste back:** `artifacts/golden-run.log` (expected vs actual, citations, gates).
+
 ### 8. Alembic (Postgres)
 
 ```bash

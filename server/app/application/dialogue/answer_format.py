@@ -46,8 +46,9 @@ _ACCORDING_TO_RE = re.compile(
     r"^Согласно\s+регламенту\s*«[^»]*»\s*:\s*",
     re.IGNORECASE,
 )
+# Clause markers like «2.7.» / «**9.5.**» — not bare «1 рабочего дня».
 _LEADING_CLAUSE_RE = re.compile(
-    r"^(?:\*\*)?\d+(?:\.\d+)*\.?(?:\*\*)?\s+"
+    r"^(?:\*\*)?\d+\.\d+(?:\.\d+)*\.?(?:\*\*)?\s+"
 )
 _INLINE_POINT_RE = re.compile(
     r"(?:,?\s*)?\bп(?:ункт)?\.?\s*\d+(?:\.\d+)*\.?\b",
@@ -91,14 +92,26 @@ _ROLE_LIKE_RE = re.compile(
     r"юридическ)"
     r")"
 )
+_WHEN_ASK_RE = re.compile(
+    r"(?i)\b("
+    r"срок|когда|в\s+какой\s+срок|как\s+быстро|за\s+сколько|сколько\s+рабоч|"
+    r"за\s+какой\s+срок|рабочих\s+дн|sla"
+    r")\b"
+)
+# Duration spans: «в течение 1 рабочего дня», «не менее чем за 3 рабочих дня».
 _WHEN_EXTRACT_RES = (
     re.compile(
-        r"(?is)(?:в\s+течение|не\s+позднее)\s+(.+?)(?:\.|$)",
+        r"(?is)(не\s+менее\s+чем\s+за|не\s+позднее(?:\s+чем)?\s+за|в\s+течение|не\s+позднее)\s+"
+        r"(\d+\s+рабоч(?:ий|их|его)?\s+д(?:ень|ня|ней))",
+    ),
+    re.compile(
+        r"(?is)(в\s+течение|не\s+позднее)\s+(.+?)(?:\.|$)",
     ),
 )
 _REGULATION_LEAK_RES = (
     re.compile(r"(?i)\bзаключа(?:ются|ется|ть)\b"),
     re.compile(r"(?i)\bподписыва(?:ют|ет|ть)\b"),
+    re.compile(r"(?i)\bподписан\b"),
     re.compile(r"(?i)\bназначает\b"),
     re.compile(r"(?i)\bкроме\b"),
     re.compile(r"(?i)\bперепродаж"),
@@ -361,7 +374,7 @@ def extract_short_paraphrase(query: str, passage: str) -> str:
         return ""
     q = (query or "").lower()
     who_ask = bool(re.search(r"\bкто\b", q))
-    when_ask = bool(re.search(r"\b(срок|когда|в\s+какой\s+срок|как\s+быстро)\b", q))
+    when_ask = bool(_WHEN_ASK_RE.search(q))
 
     def _try_agent_after() -> str:
         for pat in _WHO_AGENT_AFTER_RES:
@@ -393,13 +406,29 @@ def extract_short_paraphrase(query: str, passage: str) -> str:
             m = pat.search(passage)
             if not m:
                 continue
-            phrase = _capitalize_phrase(m.group(1))
-            if not phrase or is_incomplete_answer(phrase):
+            cue = (m.group(1) or "").strip()
+            span = _capitalize_phrase(m.group(2))
+            if not span or is_incomplete_answer(span):
                 continue
-            if looks_like_regulation_copy(phrase, passage) and len(tokenize(phrase)) > 4:
+            if looks_like_regulation_copy(span, passage) and len(tokenize(span)) > 4:
                 continue
-            if len(tokenize(phrase)) <= _MAX_ANSWER_WORDS and len(phrase) <= _MAX_ANSWER_CHARS:
-                return _format_who_phrase(phrase)
+            cue_l = cue.lower()
+            span_tail = span[0].lower() + span[1:] if span else span
+            if cue_l.startswith("не менее"):
+                phrase = f"Не менее чем за {span_tail}".strip()
+            elif cue_l.startswith("в течение"):
+                phrase = f"В течение {span_tail}".strip()
+            elif cue_l.startswith("не позднее"):
+                phrase = f"Не позднее {span_tail}".strip()
+            else:
+                phrase = span
+            phrase = _format_who_phrase(phrase)
+            if (
+                phrase
+                and len(tokenize(phrase)) <= _MAX_ANSWER_WORDS
+                and len(phrase) <= _MAX_ANSWER_CHARS
+            ):
+                return phrase
         return ""
 
     # Query only prioritizes order; always fall back across WHO/WHEN extractors so
@@ -419,19 +448,34 @@ def extract_short_paraphrase(query: str, passage: str) -> str:
     return ""
 
 
-def needs_paraphrase_repair(answer: str, *, quote: str = "") -> bool:
+_WHEN_ANSWER_HEAD_RE = re.compile(
+    r"(?i)^(в\s+течение|не\s+менее|не\s+позднее|\d+\s+рабоч)"
+)
+
+
+def needs_paraphrase_repair(answer: str, *, quote: str = "", query: str = "") -> bool:
     """True when Ответ must be repaired (dump / incomplete / too long)."""
     body = strip_regulation_noise(extract_answer_body(answer) or answer)
     if body.lower().startswith("ответ:"):
         body = body.split(":", 1)[1].strip()
     if not body:
         return True
-    return (
+    if (
         is_incomplete_answer(body)
         or looks_like_regulation_copy(body, quote)
         or len(tokenize(body)) > _MAX_ANSWER_WORDS
         or len(body) > _MAX_ANSWER_CHARS
-    )
+    ):
+        return True
+    # WHO answers must look like a role/subject — not a checklist bullet.
+    if re.search(r"(?i)\bкто\b", query or ""):
+        cleaned = body.strip(" «»\"'.")
+        if not _ROLE_LIKE_RE.match(cleaned):
+            return True
+    # WHEN answers must be a short duration paraphrase, not a full clause dump.
+    if _WHEN_ASK_RE.search(query or "") and not _WHEN_ANSWER_HEAD_RE.search(body.strip()):
+        return True
+    return False
 
 
 def enforce_short_paraphrase(
@@ -450,7 +494,7 @@ def enforce_short_paraphrase(
         body = body.split(":", 1)[1].strip()
     body = body.strip()
 
-    if body and not needs_paraphrase_repair(body, quote=quote):
+    if body and not needs_paraphrase_repair(body, quote=quote, query=query):
         if not re.search(r"[.!?…]\s*$", body):
             body = body.rstrip(".") + "."
         return body
