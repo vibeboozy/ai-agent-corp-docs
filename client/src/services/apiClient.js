@@ -105,6 +105,95 @@ class ApiClient {
   }
 
   /**
+   * Пауза между опросами (мс).
+   */
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Сетевой обрыв без ответа сервера: у такой ошибки нет HTTP-статуса и кода
+   * (fetch TypeError «Failed to fetch» при срезе соединения прокси, либо
+   * AbortError по клиентскому таймауту).
+   */
+  isNetworkCut(err) {
+    return Boolean(err) && err.status === undefined && err.code === undefined;
+  }
+
+  /**
+   * Восстановление после обрыва долгого POST. Два режима отказа прокси-релея:
+   *  A) запрос дошёл до бэкенда, ответ срезан на полпути — тогда ответ появится
+   *     в БД, и мы его заберём поллингом GET /appeals/{id}/messages;
+   *  B) запрос вообще не дошёл (в обращении нет нашего user-сообщения) —
+   *     возвращаем null, вызывающая сторона повторно отправляет вопрос.
+   */
+  async pollMessagesUntilAnswer(appealId, question, { intervalMs = 4000, acceptedAfterMs = 40000, maxWaitMs = 120000 } = {}) {
+    const start = Date.now();
+    const deadline = start + maxWaitMs;
+    const target = (question || '').trim();
+    let consecutiveFailures = 0;
+    while (Date.now() < deadline) {
+      await this.sleep(intervalMs);
+      let data;
+      try {
+        data = await this.getAppealMessages(appealId);
+        consecutiveFailures = 0;
+      } catch (err) {
+        if (err.status === 404 || err.code === 'NOT_FOUND') throw err;
+        if (this.isNetworkCut(err)) {
+          consecutiveFailures += 1;
+          // Три осечки подряд — похоже, API недоступен целиком, не мучаем пользователя.
+          if (consecutiveFailures >= 3) {
+            throw new Error('Сервер недоступен. Проверьте подключение и повторите вопрос.');
+          }
+        }
+        continue; // иная ошибка (например 5xx) — считаем временной, опрашиваем дальше
+      }
+      const items = data.items || [];
+      if (items.some((m) => m.role === 'assistant' && m.content)) {
+        return { appeal: { id: data.appeal_id || appealId }, messages: items };
+      }
+      const accepted = items.some((m) => m.role === 'user' && (m.content || '').trim() === target);
+      if (!accepted && Date.now() - start > acceptedAfterMs) {
+        return null; // запрос до бэкенда не дошёл — нужна повторная отправка
+      }
+    }
+    throw new Error('Ответ формируется дольше обычного. Повторите тот же вопрос — теперь он придёт мгновенно.');
+  }
+
+  /**
+   * Поиск только что созданного обращения по тексту вопроса — для первого
+   * сообщения, когда id обращения не успели получить из-за обрыва.
+   */
+  async findAppealIdByQuestion(question, { intervalMs = 4000, maxWaitMs = 120000 } = {}) {
+    const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const target = norm(question);
+    const deadline = Date.now() + maxWaitMs;
+    let consecutiveFailures = 0;
+    while (Date.now() < deadline) {
+      await this.sleep(intervalMs);
+      let data;
+      try {
+        data = await this.request('/appeals?limit=20', { method: 'GET' });
+        consecutiveFailures = 0;
+      } catch (err) {
+        if (this.isNetworkCut(err)) {
+          consecutiveFailures += 1;
+          if (consecutiveFailures >= 3) return null;
+        }
+        continue;
+      }
+      const items = data.items || (Array.isArray(data) ? data : []);
+      const match = items.find((it) => {
+        const q = norm(resolveEmployeeQuestion({ question: it.question, topic: it.topic }));
+        return q === target && it.id;
+      });
+      if (match) return String(match.id);
+    }
+    return null;
+  }
+
+  /**
    * Normalize CreateAppeal / CreateMessage response into the chat UI shape.
    */
   normalizeChatResponse(responseData, question, sessionId) {
@@ -175,15 +264,57 @@ class ApiClient {
       try {
         responseData = await this.postAppealMessage(session_id, question);
       } catch (err) {
-        // Stale local UUID that never existed on the server → create a fresh appeal.
         if (err.status === 404 || err.code === 'NOT_FOUND') {
+          // Stale local UUID that never existed on the server → create a fresh appeal.
           responseData = await this.createAppealWithMessage(question);
+        } else if (this.isNetworkCut(err)) {
+          // Соединение оборвано. Если запрос дошёл — дожидаемся ответа поллингом,
+          // если нет — одна повторная отправка того же вопроса.
+          const polled = await this.pollMessagesUntilAnswer(session_id, question);
+          if (polled) {
+            responseData = polled;
+          } else {
+            try {
+              responseData = await this.postAppealMessage(session_id, question);
+            } catch (err2) {
+              if (!this.isNetworkCut(err2)) throw err2;
+              const polled2 = await this.pollMessagesUntilAnswer(session_id, question);
+              if (!polled2) {
+                throw new Error('Не удалось получить ответ: соединение нестабильно. Повторите вопрос.');
+              }
+              responseData = polled2;
+            }
+          }
         } else {
           throw err;
         }
       }
     } else {
-      responseData = await this.createAppealWithMessage(question);
+      try {
+        responseData = await this.createAppealWithMessage(question);
+      } catch (err) {
+        if (!this.isNetworkCut(err)) throw err;
+        // Первый вопрос: id обращения не успели получить — ищем его в списке
+        // (обращение создаётся мгновенно, как только запрос дошёл до бэкенда).
+        let appealId = await this.findAppealIdByQuestion(question, { maxWaitMs: 35000 });
+        if (!appealId) {
+          // Запрос не дошёл — одна повторная попытка.
+          try {
+            responseData = await this.createAppealWithMessage(question);
+          } catch (err2) {
+            if (!this.isNetworkCut(err2)) throw err2;
+            appealId = await this.findAppealIdByQuestion(question, { maxWaitMs: 35000 });
+          }
+        }
+        if (!appealId) {
+          throw new Error('Не удалось получить ответ: соединение оборвалось. Повторите вопрос.');
+        }
+        const polled = await this.pollMessagesUntilAnswer(appealId, question);
+        if (!polled) {
+          throw new Error('Не удалось получить ответ: соединение оборвалось. Повторите вопрос.');
+        }
+        responseData = polled;
+      }
     }
 
     return this.normalizeChatResponse(responseData, question, session_id);
