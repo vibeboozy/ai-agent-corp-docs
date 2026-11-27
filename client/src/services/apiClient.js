@@ -7,6 +7,7 @@ import {
   mapAppealStatusToTicketStatus,
   resolveEmployeeQuestion
 } from '../utils/appealHelpers.js';
+import { dedupeCitations } from '../utils/citations.js';
 
 class ApiClient {
   getBaseUrl() {
@@ -212,11 +213,14 @@ class ApiClient {
       status = 'refusal';
     }
 
-    const citations = (lastAssistantMsg?.citations || []).map((c) => ({
-      doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
-      section: c.locator || '',
-      quote: c.quote || ''
-    }));
+    const citations = dedupeCitations(
+      (lastAssistantMsg?.citations || []).map((c) => ({
+        doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
+        section: c.locator || '',
+        quote: c.quote || '',
+        chunk_id: c.chunk_id || ''
+      }))
+    );
 
     let email_draft = null;
     if (status === 'escalate') {
@@ -506,11 +510,14 @@ class ApiClient {
           status = 'refusal';
         }
 
-        const citations = (m.citations || []).map((c) => ({
-          doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
-          section: c.locator || '',
-          quote: c.quote || ''
-        }));
+        const citations = dedupeCitations(
+          (m.citations || []).map((c) => ({
+            doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
+            section: c.locator || '',
+            quote: c.quote || '',
+            chunk_id: c.chunk_id || ''
+          }))
+        );
 
         return {
           id: m.id,

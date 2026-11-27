@@ -141,3 +141,27 @@ async def test_ingest_text_uses_docling_chunks_when_available() -> None:
     assert upserted[0]["locator"] == "§1"
     assert "chunking" not in upserted[0]["metadata"]
     assert persistence.add_audit_event.await_args.kwargs["payload"]["chunking"] == "docling"
+
+
+@pytest.mark.asyncio
+async def test_ingest_text_collapses_duplicate_docling_windows() -> None:
+    class _DupDocling:
+        async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict:
+            _ = source_path
+            body = text or "Канон"
+            return {
+                "chunks": [
+                    {"chunk_id": "d1", "text": body},
+                    {"chunk_id": "d2", "text": body},
+                    {"chunk_id": "d3", "text": f"  {body}  "},
+                ]
+            }
+
+    svc, upserted, embeddings, _persistence = _build_service(docling=_DupDocling())
+    result = await svc.ingest_text(text="Канон")
+
+    assert result["chunks"] == 1
+    assert len(upserted) == 1
+    assert upserted[0]["chunk_id"] == "d1"
+    embeddings.embed_dense.assert_awaited_once()
+    assert embeddings.embed_dense.await_args.args[0] == ["Канон"]

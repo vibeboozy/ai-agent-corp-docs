@@ -123,6 +123,31 @@ class RetrievalService:
                 out.append(hit)
         return out
 
+    @staticmethod
+    def _dedupe_identical_text(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """
+        Collapse duplicate bodies (e.g. same officer answer ingested 3× as learned-*).
+
+        Keeps first occurrence (already prefer_latest / score ordered).
+        """
+        seen_chunk: set[str] = set()
+        seen_body: set[str] = set()
+        out: list[dict[str, Any]] = []
+        for hit in hits:
+            chunk_id = str(hit.get("chunk_id") or "").strip()
+            body = " ".join(str(hit.get("text") or "").split()).casefold()
+            body_key = body[:320] if body else ""
+            if chunk_id and chunk_id in seen_chunk:
+                continue
+            if body_key and body_key in seen_body:
+                continue
+            if chunk_id:
+                seen_chunk.add(chunk_id)
+            if body_key:
+                seen_body.add(body_key)
+            out.append(hit)
+        return out
+
     def _blend_lexical(self, query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
         Re-rank with vector score + prefix-aware lexical relevance.
@@ -276,6 +301,7 @@ class RetrievalService:
             if float(h.get("vector_score", h.get("score")) or 0.0) >= self._rerank_min_score
         ]
         hits = self._cap_per_doc(hits)
+        hits = self._dedupe_identical_text(hits)
         final = hits[:final_k]
         latency: dict[str, float] = {
             "retrieval_total_ms": round((time.perf_counter() - t0) * 1000, 2),
