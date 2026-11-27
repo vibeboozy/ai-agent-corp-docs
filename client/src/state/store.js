@@ -1,13 +1,12 @@
 import { CONFIG } from '../config.js';
+import { createLocalSessionId, isServerAppealId } from '../utils/appealHelpers.js';
 
 /**
- * Генерация уникального идентификатора сессии
+ * Генерация локального id сессии (НЕ UUID серверного appeal).
+ * См. appealHelpers.createLocalSessionId — UUID-формат ломал POST /messages (404).
  */
 export function createSessionId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return 'sess-' + Math.random().toString(36).substring(2, 11) + Date.now().toString(36);
+  return createLocalSessionId();
 }
 
 const safeStorage = typeof localStorage !== 'undefined' ? localStorage : {
@@ -60,13 +59,16 @@ const initialState = {
   mode: savedMode,
   apiBaseUrl: savedApiUrl,
   sessionId: savedSessionId,
+  /** Server AppealStatus for the active session (null until first API response). */
+  appealStatus: null,
   chatMessages: savedChat,
   sessions: savedSessions,
   chatLoading: false,
   tickets: [],
   selectedTicketId: null,
-  ticketFilter: 'all', // 'all' | 'open' | 'resolved'
+  ticketFilter: 'all', // 'all' | 'open' | 'resolved' | 'answered' | 'in_progress'
   ticketsLoading: false,
+  ticketsLoadedOnce: false,
   isSettingsOpen: false
 };
 
@@ -123,6 +125,7 @@ class Store {
     const newSessionId = createSessionId();
     this.setState({
       sessionId: newSessionId,
+      appealStatus: null,
       chatMessages: [],
       chatLoading: false
     });
@@ -137,6 +140,7 @@ class Store {
     if (session) {
       this.setState({
         sessionId: session.session_id,
+        appealStatus: session.appeal_status || null,
         chatMessages: session.messages || [],
         chatLoading: false
       });
@@ -147,19 +151,42 @@ class Store {
    * Обновление идентификатора сессии при получении реального UUID от бэкенда
    * @param {string} oldId 
    * @param {string} newId 
+   * @param {string} [appealStatus]
    */
-  updateSessionId(oldId, newId) {
-    if (!newId || oldId === newId) return;
+  updateSessionId(oldId, newId, appealStatus) {
+    if (!newId || oldId === newId) {
+      if (appealStatus && this.state.sessionId === (newId || oldId)) {
+        this.setAppealStatus(appealStatus);
+      }
+      return;
+    }
+    if (!isServerAppealId(newId)) return;
     const sessions = this.state.sessions.map((s) => {
       if (s.session_id === oldId) {
-        return { ...s, session_id: newId };
+        return {
+          ...s,
+          session_id: newId,
+          appeal_status: appealStatus || s.appeal_status || null
+        };
       }
       return s;
     });
     this.setState({
       sessionId: newId,
+      appealStatus: appealStatus || this.state.appealStatus,
       sessions
     });
+  }
+
+  setAppealStatus(appealStatus) {
+    const currentSessionId = this.state.sessionId;
+    const sessions = this.state.sessions.map((s) => {
+      if (s.session_id === currentSessionId) {
+        return { ...s, appeal_status: appealStatus };
+      }
+      return s;
+    });
+    this.setState({ appealStatus, sessions });
   }
 
   /**
@@ -179,7 +206,8 @@ class Store {
         ...sessions[index],
         title: sessions[index].title && sessions[index].title !== 'Новый диалог' ? sessions[index].title : autoTitle,
         updated_at: new Date().toISOString(),
-        messages: newMessages
+        messages: newMessages,
+        appeal_status: this.state.appealStatus
       };
     } else {
       sessions.unshift({
@@ -187,7 +215,8 @@ class Store {
         title: autoTitle,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        messages: newMessages
+        messages: newMessages,
+        appeal_status: this.state.appealStatus
       });
     }
 

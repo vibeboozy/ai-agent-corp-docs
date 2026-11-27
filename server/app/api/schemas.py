@@ -54,6 +54,8 @@ class Appeal(BaseModel):
     user_label: str | None = None
     topic: str | None = None
     summary: str | None = None
+    # First user message content (for quality-cabinet list labels without a second fetch).
+    question: str | None = None
     escalation_id: UUID | None = None
     message_count: int = 0
 

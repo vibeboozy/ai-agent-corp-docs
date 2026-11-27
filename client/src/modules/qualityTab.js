@@ -2,6 +2,13 @@ import { store } from '../state/store.js';
 import { apiClient } from '../services/apiClient.js';
 import { escapeHtml, formatTextWithLineBreaks, formatDateTime } from '../utils/dom.js';
 import { toastSuccess, toastError } from '../utils/toast.js';
+import {
+  firstUserQuestionFromMessages,
+  isServerAppealId,
+  resolveEmployeeQuestion,
+  ticketStatusBadgeClass,
+  ticketStatusLabel
+} from '../utils/appealHelpers.js';
 
 export class QualityTab {
   constructor(container) {
@@ -9,7 +16,12 @@ export class QualityTab {
     this.unsubscribe = null;
   }
 
-  async mount() {
+  /**
+   * @param {{ skipInitialLoad?: boolean }} [options]
+   * skipInitialLoad: App.init already fetches GET /appeals once for the badge —
+   * avoid a duplicate request on boot.
+   */
+  async mount(options = {}) {
     this.renderLayout();
     this.bindStaticEvents();
 
@@ -17,7 +29,11 @@ export class QualityTab {
       this.handleStateChange(newState, prevState);
     });
 
-    // Первичная загрузка тикетов
+    if (options.skipInitialLoad) {
+      this.updateView(store.getState());
+      return;
+    }
+
     await this.loadTickets();
   }
 
@@ -41,6 +57,10 @@ export class QualityTab {
             <button type="button" class="filter-btn" data-filter="open">
               <span>Ожидают ответа</span>
               <span id="filter-count-open" class="filter-count">0</span>
+            </button>
+            <button type="button" class="filter-btn" data-filter="answered">
+              <span>Отвечено агентом</span>
+              <span id="filter-count-answered" class="filter-count">0</span>
             </button>
             <button type="button" class="filter-btn" data-filter="resolved">
               <span>В базе знаний</span>
@@ -77,7 +97,6 @@ export class QualityTab {
   }
 
   bindStaticEvents() {
-    // Переключение фильтров
     const filterBtns = this.container.querySelectorAll('.filter-btn');
     filterBtns.forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -89,7 +108,6 @@ export class QualityTab {
       });
     });
 
-    // Кнопка обновления
     const refreshBtn = this.container.querySelector('#refresh-tickets-btn');
     refreshBtn.addEventListener('click', async () => {
       refreshBtn.disabled = true;
@@ -108,7 +126,7 @@ export class QualityTab {
     store.setState({ ticketsLoading: true });
     try {
       const tickets = await apiClient.getTickets();
-      store.setState({ tickets, ticketsLoading: false });
+      store.setState({ tickets, ticketsLoading: false, ticketsLoadedOnce: true });
     } catch (err) {
       store.setState({ ticketsLoading: false });
       toastError(err.message || 'Не удалось загрузить тикеты');
@@ -128,32 +146,35 @@ export class QualityTab {
   updateView(state) {
     const { tickets, selectedTicketId, ticketFilter } = state;
 
-    // Обновление счётчиков на кнопках фильтров
     const allCount = tickets.length;
     const openCount = tickets.filter((t) => t.status === 'open').length;
+    const answeredCount = tickets.filter((t) => t.status === 'answered').length;
     const resolvedCount = tickets.filter((t) => t.status === 'resolved').length;
 
     const countAllEl = this.container.querySelector('#filter-count-all');
     const countOpenEl = this.container.querySelector('#filter-count-open');
+    const countAnsweredEl = this.container.querySelector('#filter-count-answered');
     const countResolvedEl = this.container.querySelector('#filter-count-resolved');
 
     if (countAllEl) countAllEl.textContent = allCount;
     if (countOpenEl) countOpenEl.textContent = openCount;
+    if (countAnsweredEl) countAnsweredEl.textContent = answeredCount;
     if (countResolvedEl) countResolvedEl.textContent = resolvedCount;
 
-    // Фильтрация списка тикетов
     let filteredTickets = tickets;
     if (ticketFilter === 'open') {
       filteredTickets = tickets.filter((t) => t.status === 'open');
     } else if (ticketFilter === 'resolved') {
       filteredTickets = tickets.filter((t) => t.status === 'resolved');
+    } else if (ticketFilter === 'answered') {
+      filteredTickets = tickets.filter((t) => t.status === 'answered');
+    } else if (ticketFilter === 'in_progress') {
+      filteredTickets = tickets.filter((t) => t.status === 'in_progress');
     }
 
-    // Автовыбор тикета, если ни один не выбран, но список не пуст
     let activeTicket = tickets.find((t) => t.ticket_id === selectedTicketId);
     if (!activeTicket && filteredTickets.length > 0) {
       activeTicket = filteredTickets[0];
-      // Обновляем selectedTicketId без лишнего перерендера
       state.selectedTicketId = activeTicket.ticket_id;
     }
 
@@ -181,7 +202,8 @@ export class QualityTab {
 
     listContainer.innerHTML = tickets.map((t) => {
       const isSelected = t.ticket_id === selectedId;
-      const isOpen = t.status === 'open';
+      const label = ticketStatusLabel(t.status);
+      const badgeClass = ticketStatusBadgeClass(t.status);
 
       return `
         <div
@@ -191,10 +213,10 @@ export class QualityTab {
           tabindex="0"
         >
           <div class="ticket-card-header">
-            <span class="ticket-id">${escapeHtml(t.ticket_id)}</span>
-            <span class="badge ${isOpen ? 'badge-open' : 'badge-resolved'}">
+            <span class="ticket-id">${escapeHtml(t.ticket_id.slice(0, 8))}</span>
+            <span class="badge ${badgeClass}">
               <span class="badge-dot"></span>
-              ${isOpen ? 'Открыт' : 'В базе знаний'}
+              ${escapeHtml(label)}
             </span>
           </div>
           <div class="ticket-card-title">${escapeHtml(t.question)}</div>
@@ -205,39 +227,58 @@ export class QualityTab {
       `;
     }).join('');
 
-    // Привязка кликов по карточкам
     const cards = listContainer.querySelectorAll('.ticket-card');
     cards.forEach((card) => {
       card.addEventListener('click', async () => {
         const id = card.getAttribute('data-ticket-id');
         store.setState({ selectedTicketId: id });
-
-        // Если в режиме API и это серверный UUID, подтягиваем свежие детали через GET /appeals/{id}
-        const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-        if (store.getState().mode === 'api' && isUuid) {
-          try {
-            const freshAppeal = await apiClient.getAppeal(id);
-            if (freshAppeal) {
-              const currentTickets = store.getState().tickets || [];
-              const updatedTickets = currentTickets.map((t) => {
-                if (t.ticket_id === id) {
-                  return {
-                    ...t,
-                    question: freshAppeal.topic || freshAppeal.summary || t.question,
-                    email_body: freshAppeal.summary || t.email_body,
-                    raw_status: freshAppeal.status
-                  };
-                }
-                return t;
-              });
-              store.setState({ tickets: updatedTickets });
-            }
-          } catch (err) {
-            console.warn('Не удалось обновить данные тикета с сервера:', err);
-          }
-        }
+        await this.enrichTicketFromServer(id);
       });
     });
+  }
+
+  /**
+   * On select: load message transcript for support context.
+   * List already has `question` from GET /appeals — no dual fetch required for the label.
+   */
+  async enrichTicketFromServer(id) {
+    if (store.getState().mode !== 'api' || !isServerAppealId(id)) return;
+
+    try {
+      const messagesRes = await apiClient.getAppealMessages(id);
+      const items = messagesRes?.items || [];
+      const firstQuestion = firstUserQuestionFromMessages(items);
+      const dialogueText = items
+        .map((m) => {
+          const who =
+            m.role === 'user' ? 'Сотрудник' :
+            m.role === 'officer' ? 'Эксперт СК' : 'Агент';
+          return `${who}: ${m.content}`;
+        })
+        .join('\n\n');
+
+      const currentTickets = store.getState().tickets || [];
+      const updatedTickets = currentTickets.map((t) => {
+        if (t.ticket_id !== id) return t;
+        const question = resolveEmployeeQuestion({
+          firstUserMessage: firstQuestion,
+          question: t.question,
+          topic: t.topic
+        });
+        return {
+          ...t,
+          question,
+          dialogue: dialogueText || t.dialogue,
+          context: dialogueText
+            ? `Сообщений в диалоге: ${items.length}`
+            : t.context,
+          message_count: items.length || t.message_count
+        };
+      });
+      store.setState({ tickets: updatedTickets });
+    } catch (err) {
+      console.warn('Не удалось загрузить историю обращения:', err);
+    }
   }
 
   renderTicketDetail(ticket) {
@@ -261,8 +302,9 @@ export class QualityTab {
     }
 
     const isOpen = ticket.status === 'open';
+    const label = ticketStatusLabel(ticket.status);
+    const badgeClass = ticketStatusBadgeClass(ticket.status);
 
-    // Блок формы ответа (для открытых) или подтверждения (для закрытых)
     let actionBlockHtml = '';
     if (isOpen) {
       actionBlockHtml = `
@@ -280,7 +322,7 @@ export class QualityTab {
             <textarea
               id="resolve-answer-input"
               class="form-control resolve-textarea"
-              placeholder="Например: При реорганизации юридического лица перенос лицензий допускается по официальному заявлению правопреемника с приложением выписки из ЕГРЮЛ и передаточного акта в течение 30 календарных дней..."
+              placeholder="Например: При реорганизации юридического лица перенос лицензий допускается по официальному заявлению правопреемника..."
               required
             ></textarea>
             <span class="form-hint">Этот ответ агент будет возвращать при аналогичных вопросах сотрудников.</span>
@@ -307,7 +349,7 @@ export class QualityTab {
           </div>
         </form>
       `;
-    } else {
+    } else if (ticket.status === 'resolved') {
       actionBlockHtml = `
         <div class="resolved-info-box">
           <div class="resolved-badge-header">
@@ -332,65 +374,83 @@ export class QualityTab {
           </div>
         </div>
       `;
+    } else {
+      actionBlockHtml = `
+        <div class="resolved-info-box">
+          <div class="resolved-badge-header">
+            <div class="resolved-title">
+              <span>Статус: ${escapeHtml(label)}</span>
+            </div>
+          </div>
+          <p class="form-hint">
+            ${ticket.status === 'answered'
+      ? 'Агент уже ответил по регламенту. Форма ответа эксперта нужна только для эскалированных обращений.'
+      : 'Обращение ещё в диалоге с агентом. Эскалация появится здесь, если агент не найдёт ответ в базе.'}
+          </p>
+        </div>
+      `;
     }
+
+    const hasTopic = Boolean(ticket.topic && String(ticket.topic).trim());
+    const hasSummary = Boolean(ticket.summary && String(ticket.summary).trim());
+    const hasDialogue = Boolean(ticket.dialogue);
+    const hasContext = hasTopic || hasSummary || hasDialogue || Boolean(ticket.context);
 
     detailContainer.innerHTML = `
       <div class="ticket-detail-view">
-        <!-- Шапка тикета -->
         <div class="ticket-detail-header">
           <div class="ticket-detail-title-group">
             <span class="ticket-detail-id">${escapeHtml(ticket.ticket_id)}</span>
             <span class="ticket-detail-date">Создан: ${formatDateTime(ticket.created_at)}</span>
           </div>
-          <span class="badge ${isOpen ? 'badge-open' : 'badge-resolved'}">
+          <span class="badge ${badgeClass}">
             <span class="badge-dot"></span>
-            ${isOpen ? 'Ожидает ответа' : 'В базе знаний'}
+            ${escapeHtml(label)}
           </span>
         </div>
 
-        <!-- Вопрос сотрудника -->
         <div class="ticket-section">
           <span class="ticket-section-title">Вопрос сотрудника:</span>
           <div class="ticket-question-text">${formatTextWithLineBreaks(ticket.question)}</div>
         </div>
 
-        <!-- Контекст и сформированное письмо -->
-        <details class="ticket-context-accordion">
+        ${hasContext ? `
+        <details class="ticket-context-accordion" ${hasDialogue || hasSummary ? 'open' : ''}>
           <summary class="ticket-context-summary">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect width="20" height="16" x="2" y="4" rx="2"/>
-              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
-            <span>Сформированное письмо и контекст диалога</span>
+            <span>Контекст обращения</span>
           </summary>
           <div class="ticket-context-body">
-            <div class="context-row">
-              <span class="context-label">Кому:</span>
-              <div class="context-val">${escapeHtml(ticket.email_to || 'quality@company.ru')}</div>
-            </div>
-            <div class="context-row">
-              <span class="context-label">Тема:</span>
-              <div class="context-val">${escapeHtml(ticket.email_subject || 'Без темы')}</div>
-            </div>
-            <div class="context-row">
-              <span class="context-label">Текст сформированного письма:</span>
-              <div class="context-val">${formatTextWithLineBreaks(ticket.email_body || '')}</div>
-            </div>
-            ${ticket.context ? `
+            ${hasTopic ? `
               <div class="context-row">
-                <span class="context-label">Контекст обращения:</span>
-                <div class="context-val">${formatTextWithLineBreaks(ticket.context)}</div>
+                <span class="context-label">Тема:</span>
+                <div class="context-val">${escapeHtml(ticket.topic)}</div>
               </div>
             ` : ''}
+            ${hasSummary ? `
+              <div class="context-row">
+                <span class="context-label">Краткое резюме:</span>
+                <div class="context-val">${formatTextWithLineBreaks(ticket.summary)}</div>
+              </div>
+            ` : ''}
+            <div class="context-row">
+              <span class="context-label">Диалог:</span>
+              <div class="context-val">${
+                hasDialogue
+                  ? formatTextWithLineBreaks(ticket.dialogue)
+                  : escapeHtml(ticket.context || 'Выберите карточку — история подгрузится автоматически.')
+              }</div>
+            </div>
           </div>
         </details>
+        ` : ''}
 
-        <!-- Блок добавления ответа или результат -->
         ${actionBlockHtml}
       </div>
     `;
 
-    // Привязка формы разрешения тикета
     if (isOpen) {
       const resolveForm = detailContainer.querySelector('#resolve-ticket-form');
       const submitBtn = detailContainer.querySelector('#resolve-submit-btn');
@@ -416,7 +476,6 @@ export class QualityTab {
             regulation_ref
           });
 
-          // Обновляем список тикетов в хранилище
           const currentTickets = store.getState().tickets;
           const updatedList = currentTickets.map((t) => {
             if (t.ticket_id === ticket.ticket_id) {
@@ -436,7 +495,6 @@ export class QualityTab {
             selectedTicketId: ticket.ticket_id
           });
 
-          // Добавляем официальный ответ эксперта прямо в диалог соответствующей сессии
           const targetSessionId = ticket.session_id;
           const allSessions = store.getState().sessions || [];
           const sessionIndex = allSessions.findIndex((s) => s.session_id === targetSessionId);
@@ -473,7 +531,6 @@ export class QualityTab {
             store.setState({ sessions: updatedSessions });
             localStorage.setItem('sq_agent_sessions', JSON.stringify(updatedSessions));
 
-            // Если эта сессия сейчас активна в чате, обновляем и текущий экран чата
             if (store.getState().sessionId === targetSessionId) {
               store.setState({ chatMessages: newSessionMsgs });
             }

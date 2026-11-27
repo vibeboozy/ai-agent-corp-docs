@@ -10,7 +10,14 @@ from app.api import schemas
 from app.domain.models import Appeal, Message
 
 
-def to_appeal_dto(appeal: Appeal, *, message_count: int = 0) -> schemas.Appeal:
+def to_appeal_dto(
+    appeal: Appeal,
+    *,
+    message_count: int = 0,
+    question: str | None = None,
+) -> schemas.Appeal:
+    # Prefer explicit first-user-message question; fall back to topic for empty chats.
+    resolved_question = question if (question and question.strip()) else appeal.topic
     return schemas.Appeal(
         id=appeal.id,
         status=appeal.status.value,  # type: ignore[arg-type]
@@ -20,6 +27,7 @@ def to_appeal_dto(appeal: Appeal, *, message_count: int = 0) -> schemas.Appeal:
         user_label=appeal.user_label,
         topic=appeal.topic,
         summary=appeal.summary,
+        question=resolved_question,
         escalation_id=appeal.escalation_id,
         message_count=message_count,
     )

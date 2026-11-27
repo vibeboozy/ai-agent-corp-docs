@@ -221,6 +221,28 @@ class SqlAlchemyPersistence:
             stmt = select(func.count()).select_from(MessageRow).where(MessageRow.appeal_id == appeal_id)
             return int((await session.execute(stmt)).scalar_one())
 
+    async def first_user_messages(
+        self, appeal_ids: list[UUID]
+    ) -> dict[UUID, str]:
+        if not appeal_ids:
+            return {}
+        async with self._sessionmaker() as session:
+            # Earliest user message per appeal (portable: order + first-seen).
+            stmt = (
+                select(MessageRow.appeal_id, MessageRow.content)
+                .where(
+                    MessageRow.appeal_id.in_(appeal_ids),
+                    MessageRow.role == MessageRole.USER.value,
+                )
+                .order_by(MessageRow.appeal_id.asc(), MessageRow.created_at.asc())
+            )
+            rows = (await session.execute(stmt)).all()
+            out: dict[UUID, str] = {}
+            for appeal_id, content in rows:
+                if appeal_id not in out and content:
+                    out[appeal_id] = str(content)
+            return out
+
     async def create_escalation(
         self,
         *,

@@ -56,6 +56,11 @@
   --color-danger-bg: #FDF2F4;
   --color-danger-border: #F5D5DC;
 
+  /* Info toast — must NOT reuse brand primary (which is red and reads as error) */
+  --color-info: #0369A1;
+  --color-info-bg: #F0F9FF;
+  --color-info-border: #BAE6FD;
+
   /* Типографика - комфортный enterprise-размер шрифтов */
   --font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, Menlo, Monaco, monospace;

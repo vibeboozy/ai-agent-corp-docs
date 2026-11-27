@@ -1,6 +1,12 @@
 import { store } from '../state/store.js';
 import { mockService } from './mockService.js';
 import { CONFIG } from '../config.js';
+import {
+  APPEALS_LIST_LIMIT,
+  isServerAppealId,
+  mapAppealStatusToTicketStatus,
+  resolveEmployeeQuestion
+} from '../utils/appealHelpers.js';
 
 class ApiClient {
   getBaseUrl() {
@@ -40,6 +46,7 @@ class ApiClient {
 
       if (!response.ok) {
         let errorDetail = `Ошибка сервера: ${response.status} ${response.statusText}`;
+        let errorCode = null;
         try {
           const errorData = await response.json();
           if (errorData.detail) {
@@ -49,10 +56,14 @@ class ApiClient {
           } else if (errorData.message) {
             errorDetail = errorData.message;
           }
+          if (errorData.code) errorCode = errorData.code;
         } catch {
           // Игнорируем ошибку парсинга тела
         }
-        throw new Error(errorDetail);
+        const err = new Error(errorDetail);
+        err.status = response.status;
+        err.code = errorCode;
+        throw err;
       }
 
       return await response.json();
@@ -66,49 +77,50 @@ class ApiClient {
   }
 
   /**
-   * Отправка вопроса в чат (адаптировано под Appeal-центричный контракт бэкенда /api/v1/appeals)
-   * @param {{ question: string, session_id: string, history: Array }} payload
+   * Create a new appeal with the first user message.
    */
-  async sendChatMessage(payload) {
-    if (this.isMockMode()) {
-      return await mockService.sendChatMessage(payload);
-    }
+  async createAppealWithMessage(question) {
+    return await this.request('/appeals', {
+      method: 'POST',
+      body: JSON.stringify({
+        topic: question.slice(0, 120),
+        message: {
+          content: question
+        }
+      })
+    });
+  }
 
-    const { question, session_id } = payload;
-    const isServerUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(session_id);
+  /**
+   * Post a follow-up user message to an existing appeal.
+   */
+  async postAppealMessage(appealId, question) {
+    return await this.request(`/appeals/${appealId}/messages`, {
+      method: 'POST',
+      body: JSON.stringify({
+        content: question,
+        role: 'user'
+      })
+    });
+  }
 
-    let responseData;
-    if (isServerUuid) {
-      // Продолжение диалога внутри существующего обращения: POST /api/v1/appeals/{id}/messages
-      responseData = await this.request(`/appeals/${session_id}/messages`, {
-        method: 'POST',
-        body: JSON.stringify({
-          content: question,
-          role: 'user'
-        })
-      });
-    } else {
-      // Старт нового обращения: POST /api/v1/appeals
-      responseData = await this.request('/appeals', {
-        method: 'POST',
-        body: JSON.stringify({
-          topic: question.slice(0, 50),
-          message: {
-            content: question
-          }
-        })
-      });
-    }
-
+  /**
+   * Normalize CreateAppeal / CreateMessage response into the chat UI shape.
+   */
+  normalizeChatResponse(responseData, question, sessionId) {
     const appeal = responseData.appeal || {};
     const messages = responseData.messages || [];
-    const lastAssistantMsg = [...messages].reverse().find((m) => m.role === 'assistant') || messages[messages.length - 1];
+    const lastAssistantMsg =
+      [...messages].reverse().find((m) => m.role === 'assistant') ||
+      messages[messages.length - 1];
 
     let status = 'answer';
     if (appeal.status === 'clarifying' || lastAssistantMsg?.message_kind === 'clarification') {
       status = 'clarify';
     } else if (appeal.status === 'escalated' || lastAssistantMsg?.message_kind === 'escalation_notice') {
       status = 'escalate';
+    } else if (lastAssistantMsg?.message_kind === 'refusal') {
+      status = 'refusal';
     }
 
     const citations = (lastAssistantMsg?.citations || []).map((c) => ({
@@ -122,13 +134,16 @@ class ApiClient {
       email_draft = {
         to: 'quality@company.ru',
         subject: `Запрос разъяснения регламента: ${question.slice(0, 45)}...`,
-        body: `Здравствуйте!\n\nПрошу предоставить официальное разъяснение по вопросу:\n«${question}»\n\nС уважением,\nСотрудник отдела сопровождения`
+        body:
+          `Здравствуйте!\n\nПрошу предоставить официальное разъяснение по вопросу:\n«${question}»\n\nС уважением,\nСотрудник отдела сопровождения`
       };
     }
 
-    // Если сервер сгенерировал новый UUID для Appeal, синхронизируем идентификатор сессии
-    if (appeal.id && String(appeal.id) !== session_id) {
-      store.updateSessionId(session_id, String(appeal.id));
+    const appealId = appeal.id ? String(appeal.id) : sessionId;
+    if (appeal.id && String(appeal.id) !== sessionId) {
+      store.updateSessionId(sessionId, String(appeal.id), appeal.status || null);
+    } else if (appeal.status) {
+      store.setAppealStatus(appeal.status);
     }
 
     return {
@@ -136,8 +151,42 @@ class ApiClient {
       reply: lastAssistantMsg?.content || 'Ответ сформирован.',
       citations,
       email_draft,
-      appeal_id: appeal.id || session_id
+      appeal_id: appealId,
+      appeal_status: appeal.status || null
     };
+  }
+
+  /**
+   * Отправка вопроса в чат (адаптировано под Appeal-центричный контракт бэкенда /api/v1/appeals)
+   * @param {{ question: string, session_id: string, history: Array }} payload
+   */
+  async sendChatMessage(payload) {
+    if (this.isMockMode()) {
+      return await mockService.sendChatMessage(payload);
+    }
+
+    const { question, session_id } = payload;
+    // Only continue an existing appeal when session_id is a real server UUID.
+    // Local ids use sess-… prefix so they never collide with crypto.randomUUID leftovers.
+    const hasServerAppeal = isServerAppealId(session_id);
+
+    let responseData;
+    if (hasServerAppeal) {
+      try {
+        responseData = await this.postAppealMessage(session_id, question);
+      } catch (err) {
+        // Stale local UUID that never existed on the server → create a fresh appeal.
+        if (err.status === 404 || err.code === 'NOT_FOUND') {
+          responseData = await this.createAppealWithMessage(question);
+        } else {
+          throw err;
+        }
+      }
+    } else {
+      responseData = await this.createAppealWithMessage(question);
+    }
+
+    return this.normalizeChatResponse(responseData, question, session_id);
   }
 
   /**
@@ -149,7 +198,7 @@ class ApiClient {
     }
 
     // На бэкенде Appeal создаётся сразу при первом вопросе
-    if (payload.session_id) {
+    if (payload.session_id && isServerAppealId(payload.session_id)) {
       return {
         ticket_id: payload.session_id,
         status: 'open'
@@ -173,6 +222,37 @@ class ApiClient {
   }
 
   /**
+   * Map a server Appeal DTO to the quality-cabinet ticket shape.
+   * Never use summary as the employee question (summary is the AI answer/refusal).
+   */
+  mapAppealToTicket(item) {
+    const uiStatus = mapAppealStatusToTicketStatus(item.status);
+    const isResolved = uiStatus === 'resolved';
+    // Prefer API `question` (first user message) over topic; never use summary.
+    const question = resolveEmployeeQuestion({
+      question: item.question,
+      topic: item.topic
+    });
+
+    return {
+      ticket_id: String(item.id),
+      question,
+      status: uiStatus,
+      raw_status: item.status,
+      topic: item.topic || null,
+      summary: item.summary || null,
+      context: null,
+      dialogue: null,
+      created_at: item.created_at,
+      answer: isResolved ? (item.summary || 'Ответ эксперта внесён в базу знаний') : null,
+      regulation_ref: item.topic || 'Регламент компании',
+      resolved_at: isResolved ? item.updated_at : null,
+      session_id: String(item.id),
+      message_count: item.message_count || 0
+    };
+  }
+
+  /**
    * Загрузка списка тикетов / обращений (GET /api/v1/appeals)
    * @param {string} [status]
    */
@@ -181,35 +261,22 @@ class ApiClient {
       return await mockService.getTickets(status);
     }
 
-    let query = '';
+    const params = new URLSearchParams();
+    params.set('limit', String(APPEALS_LIST_LIMIT));
     if (status === 'open') {
-      query = '?status=escalated';
+      params.set('status', 'escalated');
     } else if (status === 'resolved') {
-      query = '?status=resolved_by_officer';
+      params.set('status', 'resolved_by_officer');
+    } else if (status === 'answered') {
+      params.set('status', 'answered');
     }
 
-    const data = await this.request(`/appeals${query}`, {
+    const data = await this.request(`/appeals?${params.toString()}`, {
       method: 'GET'
     });
 
     const items = data.items || (Array.isArray(data) ? data : []);
-
-    return items.map((item) => {
-      const isResolved = item.status === 'resolved_by_officer' || item.status === 'closed';
-      return {
-        ticket_id: String(item.id),
-        question: item.topic || item.summary || 'Вопрос сотрудника в Службу качества',
-        status: isResolved ? 'resolved' : 'open',
-        raw_status: item.status,
-        email_to: 'quality@company.ru',
-        email_subject: item.topic || `Обращение ${String(item.id).slice(0, 8)}`,
-        email_body: item.summary || '',
-        created_at: item.created_at,
-        answer: item.summary || (isResolved ? 'Ответ эксперта внесён в базу знаний' : null),
-        regulation_ref: item.topic || 'Регламент компании',
-        resolved_at: isResolved ? item.updated_at : null
-      };
-    });
+    return items.map((item) => this.mapAppealToTicket(item));
   }
 
   /**
@@ -319,6 +386,7 @@ class ApiClient {
           role: m.role,
           content: m.content,
           status,
+          message_kind: m.message_kind,
           citations,
           timestamp: m.created_at || new Date().toISOString()
         };
