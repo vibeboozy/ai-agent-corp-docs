@@ -234,7 +234,9 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             not result.ok
             or not result.answer_text
             or result.needs_repair
-            or needs_paraphrase_repair(final_body, quote=quote)
+            or needs_paraphrase_repair(
+                final_body, quote=quote, query=user_message
+            )
         ):
             bad = final_body or extract_answer_body(draft or "") or (draft or "")[:240]
             t1 = time.perf_counter()

@@ -126,6 +126,12 @@ class RetrievalService:
             h["lexical_score"] = lex
             # Demote high-vector / low-lexical mid-chunk noise (e.g. §17 vs §7.2).
             rank = (1.0 - w) * vec_n * (0.2 + 0.8 * max(lex, 0.05)) + w * lex
+            # Demote context-poor HybridChunker orphans / checklist bullets.
+            n_tok = len(text.split())
+            if n_tok and n_tok < 8:
+                rank *= 0.5
+            elif n_tok < 14:
+                rank *= 0.85
             h["rank_score"] = rank
             # Exposed score tracks rank (audits/citations) while vector_score stays raw.
             h["score"] = rank
