@@ -43,7 +43,10 @@ _MIN_CHUNK_TOKENS = 4
 # Bare numbered list item («1. …») — not a multipart clause («9.5. …»).
 _LIST_ITEM_RE = re.compile(r"^\d+\.(?!\d)\s+")
 _WHEN_ASK_RE = re.compile(
-    r"(?i)\b(срок|когда|в\s+какой\s+срок|как\s+быстро|за\s+сколько|сколько\s+рабоч)\b"
+    r"(?i)\b("
+    r"срок|когда|в\s+какой\s+срок|как\s+быстро|за\s+сколько|сколько\s+рабоч|"
+    r"за\s+какой\s+срок|рабочих\s+дн|sla"
+    r")\b"
 )
 _WHO_ASK_RE = re.compile(r"(?i)\bкто\b")
 _TEMPORAL_CUE_RE = re.compile(
@@ -184,6 +187,35 @@ class GroundingService:
                     answer_text=None,
                     reason="irrelevant_citations",
                 )
+            # WHEN: do not answer from a weakly topical deadline when a more
+            # on-topic hit exists without a number (e.g. SLA п.1.7 vs «3 дня» п.1.5).
+            if when_ask and usable:
+                best_topic = max(
+                    (
+                        lexical_relevance(query or "", str(c.get("text") or ""))
+                        for c in usable
+                    ),
+                    default=0.0,
+                )
+                topical_floor = max(self._min_query_overlap, best_topic * 0.5)
+                temporal_topical = [
+                    c
+                    for c in usable
+                    if self._has_temporal_cue(str(c.get("text") or ""))
+                    and lexical_relevance(query or "", str(c.get("text") or ""))
+                    >= topical_floor
+                ]
+                if temporal_topical:
+                    usable = temporal_topical
+                elif any(
+                    self._has_temporal_cue(str(c.get("text") or "")) for c in usable
+                ):
+                    return GroundingResult(
+                        ok=False,
+                        citations=[],
+                        answer_text=None,
+                        reason="irrelevant_citations",
+                    )
             # WHO: do not hard-require agency verbs (valid «планирует» / role clauses vary);
             # ranking + weak-chunk reject + extract loop handle checklist junk.
 

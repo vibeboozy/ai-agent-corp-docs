@@ -93,7 +93,10 @@ _ROLE_LIKE_RE = re.compile(
     r")"
 )
 _WHEN_ASK_RE = re.compile(
-    r"(?i)\b(срок|когда|в\s+какой\s+срок|как\s+быстро|за\s+сколько|сколько\s+рабоч)\b"
+    r"(?i)\b("
+    r"срок|когда|в\s+какой\s+срок|как\s+быстро|за\s+сколько|сколько\s+рабоч|"
+    r"за\s+какой\s+срок|рабочих\s+дн|sla"
+    r")\b"
 )
 # Duration spans: «в течение 1 рабочего дня», «не менее чем за 3 рабочих дня».
 _WHEN_EXTRACT_RES = (
@@ -445,6 +448,11 @@ def extract_short_paraphrase(query: str, passage: str) -> str:
     return ""
 
 
+_WHEN_ANSWER_HEAD_RE = re.compile(
+    r"(?i)^(в\s+течение|не\s+менее|не\s+позднее|\d+\s+рабоч)"
+)
+
+
 def needs_paraphrase_repair(answer: str, *, quote: str = "", query: str = "") -> bool:
     """True when Ответ must be repaired (dump / incomplete / too long)."""
     body = strip_regulation_noise(extract_answer_body(answer) or answer)
@@ -464,6 +472,9 @@ def needs_paraphrase_repair(answer: str, *, quote: str = "", query: str = "") ->
         cleaned = body.strip(" «»\"'.")
         if not _ROLE_LIKE_RE.match(cleaned):
             return True
+    # WHEN answers must be a short duration paraphrase, not a full clause dump.
+    if _WHEN_ASK_RE.search(query or "") and not _WHEN_ANSWER_HEAD_RE.search(body.strip()):
+        return True
     return False
 
 
