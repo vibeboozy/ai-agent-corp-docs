@@ -72,6 +72,12 @@ class Persistence(Protocol):
 
     async def count_messages(self, appeal_id: UUID) -> int: ...
 
+    async def first_user_messages(
+        self, appeal_ids: list[UUID]
+    ) -> dict[UUID, str]:
+        """Earliest user-role message content per appeal id (batch for list DTOs)."""
+        ...
+
     async def create_escalation(
         self,
         *,

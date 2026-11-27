@@ -75,6 +75,22 @@ class _FakePersistence:
     ) -> list[Message]:
         return [m for m in self.messages if m.appeal_id == appeal_id][:limit]
 
+    async def first_user_messages(
+        self, appeal_ids: list[UUID]
+    ) -> dict[UUID, str]:
+        out: dict[UUID, str] = {}
+        for aid in appeal_ids:
+            for m in self.messages:
+                if (
+                    m.appeal_id == aid
+                    and m.role == MessageRole.USER
+                    and m.content
+                    and aid not in out
+                ):
+                    out[aid] = m.content
+                    break
+        return out
+
     async def list_appeals(self, **kwargs: Any) -> tuple[list[Appeal], int]:
         items = list(self.appeals.values())
         limit = int(kwargs.get("limit") or 50)
@@ -157,3 +173,40 @@ async def test_list_respects_limit_above_50() -> None:
     views, total = await svc.list(limit=200)
     assert total == 60
     assert len(views) == 60
+
+
+@pytest.mark.asyncio
+async def test_list_includes_first_user_question() -> None:
+    persistence = _FakePersistence()
+    dialogue = _FakeDialogue(persistence)
+    svc = AppealsService(persistence=persistence, dialogue=dialogue)  # type: ignore[arg-type]
+
+    # Topic truncated / different from full question — list must still expose full question.
+    await svc.create(
+        topic="Сколько времени",
+        first_message="Сколько времени в Москве?",
+    )
+
+    views, total = await svc.list(limit=50)
+    assert total == 1
+    assert views[0].question == "Сколько времени в Москве?"
+
+
+@pytest.mark.asyncio
+async def test_to_appeal_dto_exposes_question() -> None:
+    from app.api.mapping import to_appeal_dto
+
+    persistence = _FakePersistence()
+    dialogue = _FakeDialogue(persistence)
+    svc = AppealsService(persistence=persistence, dialogue=dialogue)  # type: ignore[arg-type]
+    result = await svc.create(
+        topic=None,
+        first_message="Кто подписывает договоры на закупку?",
+    )
+    dto = to_appeal_dto(
+        result.appeal,
+        message_count=result.message_count,
+        question=result.question,
+    )
+    assert dto.question == "Кто подписывает договоры на закупку?"
+    assert dto.summary != dto.question

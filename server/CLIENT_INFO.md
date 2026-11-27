@@ -60,10 +60,13 @@ Optional correlation: echo `X-Request-Id` if provided; otherwise server may set 
   "user_label": "optional display",
   "topic": "optional",
   "summary": "optional",
+  "question": "first user message content (or topic fallback)",
   "escalation_id": "uuid-or-null",
   "message_count": 3
 }
 ```
+
+`question` is filled on list/get/create from the earliest user message so clients (quality cabinet) can show the employee question without a second messages fetch. Falls back to `topic` when no user messages exist.
 
 ### Message
 

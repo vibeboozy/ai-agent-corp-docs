@@ -16,7 +16,7 @@ from uuid import UUID
 
 from app.adapters.persistence.port import Persistence
 from app.application.dialogue.service import DialogueService, DialogueTurnResult
-from app.domain.enums import AppealStatus
+from app.domain.enums import AppealStatus, MessageRole
 from app.domain.errors import NotFoundError
 from app.domain.models import Appeal, Message
 
@@ -25,6 +25,7 @@ from app.domain.models import Appeal, Message
 class AppealView:
     appeal: Appeal
     message_count: int
+    question: str | None = None
 
 
 @dataclass
@@ -32,6 +33,14 @@ class CreateAppealResult:
     appeal: Appeal
     messages: list[Message]
     message_count: int
+    question: str | None = None
+
+
+def _question_from_messages(messages: list[Message]) -> str | None:
+    for m in messages:
+        if m.role == MessageRole.USER and m.content and m.content.strip():
+            return m.content.strip()
+    return None
 
 
 class AppealsService:
@@ -73,14 +82,24 @@ class AppealsService:
             appeal = turn.appeal
             messages = turn.messages
         count = await self._persistence.count_messages(appeal.id)
-        return CreateAppealResult(appeal=appeal, messages=messages, message_count=count)
+        question = _question_from_messages(messages) or (
+            first_message.strip() if first_message else None
+        ) or appeal.topic
+        return CreateAppealResult(
+            appeal=appeal,
+            messages=messages,
+            message_count=count,
+            question=question,
+        )
 
     async def get(self, appeal_id: UUID) -> AppealView:
         appeal = await self._persistence.get_appeal(appeal_id)
         if appeal is None:
             raise NotFoundError(f"Appeal {appeal_id} not found")
         count = await self._persistence.count_messages(appeal_id)
-        return AppealView(appeal=appeal, message_count=count)
+        questions = await self._persistence.first_user_messages([appeal_id])
+        question = questions.get(appeal_id) or appeal.topic
+        return AppealView(appeal=appeal, message_count=count, question=question)
 
     async def list(
         self,
@@ -100,10 +119,15 @@ class AppealsService:
             created_from=created_from,
             created_to=created_to,
         )
+        ids = [a.id for a in appeals]
+        questions = await self._persistence.first_user_messages(ids)
         views: list[AppealView] = []
         for a in appeals:
             count = await self._persistence.count_messages(a.id)
-            views.append(AppealView(appeal=a, message_count=count))
+            question = questions.get(a.id) or a.topic
+            views.append(
+                AppealView(appeal=a, message_count=count, question=question)
+            )
         return views, total
 
     async def list_messages(

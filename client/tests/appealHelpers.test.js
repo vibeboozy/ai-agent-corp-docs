@@ -76,6 +76,16 @@ describe('resolveEmployeeQuestion', () => {
     );
   });
 
+  it('uses API question field before topic (list without click)', () => {
+    assert.equal(
+      resolveEmployeeQuestion({
+        question: 'Сколько времени в Москве?',
+        topic: 'Сколько времени'
+      }),
+      'Сколько времени в Москве?'
+    );
+  });
+
   it('uses topic when messages missing', () => {
     assert.equal(
       resolveEmployeeQuestion({ topic: 'Кто подписывает договоры?' }),

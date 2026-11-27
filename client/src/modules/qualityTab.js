@@ -5,7 +5,6 @@ import { toastSuccess, toastError } from '../utils/toast.js';
 import {
   firstUserQuestionFromMessages,
   isServerAppealId,
-  mapAppealStatusToTicketStatus,
   resolveEmployeeQuestion,
   ticketStatusBadgeClass,
   ticketStatusLabel
@@ -239,17 +238,14 @@ export class QualityTab {
   }
 
   /**
-   * Load appeal + messages so the employee question and dialogue context are accurate.
+   * On select: load message transcript for support context.
+   * List already has `question` from GET /appeals — no dual fetch required for the label.
    */
   async enrichTicketFromServer(id) {
     if (store.getState().mode !== 'api' || !isServerAppealId(id)) return;
 
     try {
-      const [freshAppeal, messagesRes] = await Promise.all([
-        apiClient.getAppeal(id),
-        apiClient.getAppealMessages(id).catch(() => null)
-      ]);
-
+      const messagesRes = await apiClient.getAppealMessages(id);
       const items = messagesRes?.items || [];
       const firstQuestion = firstUserQuestionFromMessages(items);
       const dialogueText = items
@@ -261,24 +257,17 @@ export class QualityTab {
         })
         .join('\n\n');
 
-      const question = resolveEmployeeQuestion({
-        firstUserMessage: firstQuestion,
-        topic: freshAppeal?.topic,
-        question: freshAppeal?.question
-      });
-
       const currentTickets = store.getState().tickets || [];
       const updatedTickets = currentTickets.map((t) => {
         if (t.ticket_id !== id) return t;
+        const question = resolveEmployeeQuestion({
+          firstUserMessage: firstQuestion,
+          question: t.question,
+          topic: t.topic
+        });
         return {
           ...t,
           question,
-          email_body: freshAppeal?.summary || t.email_body,
-          email_subject: freshAppeal?.topic || t.email_subject,
-          raw_status: freshAppeal?.status || t.raw_status,
-          status: freshAppeal?.status
-            ? mapAppealStatusToTicketStatus(freshAppeal.status)
-            : t.status,
           dialogue: dialogueText || t.dialogue,
           context: dialogueText
             ? `Сообщений в диалоге: ${items.length}`
@@ -288,7 +277,7 @@ export class QualityTab {
       });
       store.setState({ tickets: updatedTickets });
     } catch (err) {
-      console.warn('Не удалось обновить данные тикета с сервера:', err);
+      console.warn('Не удалось загрузить историю обращения:', err);
     }
   }
 
@@ -402,8 +391,10 @@ export class QualityTab {
       `;
     }
 
-    const hasLetter = Boolean(ticket.email_body || ticket.email_subject);
+    const hasTopic = Boolean(ticket.topic && String(ticket.topic).trim());
+    const hasSummary = Boolean(ticket.summary && String(ticket.summary).trim());
     const hasDialogue = Boolean(ticket.dialogue);
+    const hasContext = hasTopic || hasSummary || hasDialogue || Boolean(ticket.context);
 
     detailContainer.innerHTML = `
       <div class="ticket-detail-view">
@@ -423,42 +414,38 @@ export class QualityTab {
           <div class="ticket-question-text">${formatTextWithLineBreaks(ticket.question)}</div>
         </div>
 
-        <details class="ticket-context-accordion" ${hasDialogue || hasLetter ? 'open' : ''}>
+        ${hasContext ? `
+        <details class="ticket-context-accordion" ${hasDialogue || hasSummary ? 'open' : ''}>
           <summary class="ticket-context-summary">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <rect width="20" height="16" x="2" y="4" rx="2"/>
-              <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
             </svg>
-            <span>Сформированное письмо и контекст диалога</span>
+            <span>Контекст обращения</span>
           </summary>
           <div class="ticket-context-body">
-            ${hasLetter ? `
+            ${hasTopic ? `
               <div class="context-row">
-                <span class="context-label">Кому:</span>
-                <div class="context-val">${escapeHtml(ticket.email_to || 'quality@company.ru')}</div>
-              </div>
-              <div class="context-row">
-                <span class="context-label">Тема / topic:</span>
-                <div class="context-val">${escapeHtml(ticket.email_subject || 'Без темы')}</div>
-              </div>
-              <div class="context-row">
-                <span class="context-label">Краткое резюме агента (summary):</span>
-                <div class="context-val">${formatTextWithLineBreaks(ticket.email_body || '—')}</div>
+                <span class="context-label">Тема:</span>
+                <div class="context-val">${escapeHtml(ticket.topic)}</div>
               </div>
             ` : ''}
-            ${hasDialogue ? `
+            ${hasSummary ? `
               <div class="context-row">
-                <span class="context-label">Контекст диалога:</span>
-                <div class="context-val">${formatTextWithLineBreaks(ticket.dialogue)}</div>
+                <span class="context-label">Краткое резюме:</span>
+                <div class="context-val">${formatTextWithLineBreaks(ticket.summary)}</div>
               </div>
-            ` : `
-              <div class="context-row">
-                <span class="context-label">Контекст диалога:</span>
-                <div class="context-val">${escapeHtml(ticket.context || 'Откройте карточку ещё раз после загрузки истории, либо обновите список.')}</div>
-              </div>
-            `}
+            ` : ''}
+            <div class="context-row">
+              <span class="context-label">Диалог:</span>
+              <div class="context-val">${
+                hasDialogue
+                  ? formatTextWithLineBreaks(ticket.dialogue)
+                  : escapeHtml(ticket.context || 'Выберите карточку — история подгрузится автоматически.')
+              }</div>
+            </div>
           </div>
         </details>
+        ` : ''}
 
         ${actionBlockHtml}
       </div>

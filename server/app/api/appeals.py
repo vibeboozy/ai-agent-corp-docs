@@ -61,7 +61,12 @@ async def list_appeals(
     except AppError as exc:
         raise http_error(exc) from exc
     return AppealListResponse(
-        items=[to_appeal_dto(v.appeal, message_count=v.message_count) for v in views],
+        items=[
+            to_appeal_dto(
+                v.appeal, message_count=v.message_count, question=v.question
+            )
+            for v in views
+        ],
         total=total,
         limit=limit,
         offset=offset,
@@ -74,7 +79,9 @@ async def get_appeal(appeal_id: UUID, container: ContainerDep) -> Appeal:
         view = await container.appeals.get(appeal_id)
     except AppError as exc:
         raise http_error(exc) from exc
-    return to_appeal_dto(view.appeal, message_count=view.message_count)
+    return to_appeal_dto(
+        view.appeal, message_count=view.message_count, question=view.question
+    )
 
 
 @router.post("/appeals", response_model=CreateAppealResponse, status_code=status.HTTP_201_CREATED)
@@ -93,7 +100,11 @@ async def create_appeal(
     except AppError as exc:
         raise http_error(exc) from exc
     return CreateAppealResponse(
-        appeal=to_appeal_dto(result.appeal, message_count=result.message_count),
+        appeal=to_appeal_dto(
+            result.appeal,
+            message_count=result.message_count,
+            question=result.question,
+        ),
         messages=[to_message_dto(m) for m in result.messages],
     )
 

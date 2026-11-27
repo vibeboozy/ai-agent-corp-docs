@@ -228,9 +228,10 @@ class ApiClient {
   mapAppealToTicket(item) {
     const uiStatus = mapAppealStatusToTicketStatus(item.status);
     const isResolved = uiStatus === 'resolved';
+    // Prefer API `question` (first user message) over topic; never use summary.
     const question = resolveEmployeeQuestion({
-      topic: item.topic,
-      question: item.question
+      question: item.question,
+      topic: item.topic
     });
 
     return {
@@ -238,9 +239,8 @@ class ApiClient {
       question,
       status: uiStatus,
       raw_status: item.status,
-      email_to: 'quality@company.ru',
-      email_subject: item.topic || `Обращение ${String(item.id).slice(0, 8)}`,
-      email_body: item.summary || '',
+      topic: item.topic || null,
+      summary: item.summary || null,
       context: null,
       dialogue: null,
       created_at: item.created_at,
