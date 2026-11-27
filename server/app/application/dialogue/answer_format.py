@@ -46,8 +46,9 @@ _ACCORDING_TO_RE = re.compile(
     r"^Согласно\s+регламенту\s*«[^»]*»\s*:\s*",
     re.IGNORECASE,
 )
+# Clause markers like «2.7.» / «**9.5.**» — not bare «1 рабочего дня».
 _LEADING_CLAUSE_RE = re.compile(
-    r"^(?:\*\*)?\d+(?:\.\d+)*\.?(?:\*\*)?\s+"
+    r"^(?:\*\*)?\d+\.\d+(?:\.\d+)*\.?(?:\*\*)?\s+"
 )
 _INLINE_POINT_RE = re.compile(
     r"(?:,?\s*)?\bп(?:ункт)?\.?\s*\d+(?:\.\d+)*\.?\b",
@@ -393,13 +394,26 @@ def extract_short_paraphrase(query: str, passage: str) -> str:
             m = pat.search(passage)
             if not m:
                 continue
-            phrase = _capitalize_phrase(m.group(1))
-            if not phrase or is_incomplete_answer(phrase):
+            # Keep the temporal cue in the paraphrase («В течение 1 рабочего дня»).
+            cue = (m.group(0).split(m.group(1), 1)[0] or "").strip()
+            span = _capitalize_phrase(m.group(1))
+            if not span or is_incomplete_answer(span):
                 continue
-            if looks_like_regulation_copy(phrase, passage) and len(tokenize(phrase)) > 4:
+            if looks_like_regulation_copy(span, passage) and len(tokenize(span)) > 4:
                 continue
-            if len(tokenize(phrase)) <= _MAX_ANSWER_WORDS and len(phrase) <= _MAX_ANSWER_CHARS:
-                return _format_who_phrase(phrase)
+            if cue.lower().startswith("в течение"):
+                phrase = f"В течение {span[0].lower() + span[1:] if span else span}".strip()
+            elif cue.lower().startswith("не позднее"):
+                phrase = f"Не позднее {span[0].lower() + span[1:] if span else span}".strip()
+            else:
+                phrase = span
+            phrase = _format_who_phrase(phrase)
+            if (
+                phrase
+                and len(tokenize(phrase)) <= _MAX_ANSWER_WORDS
+                and len(phrase) <= _MAX_ANSWER_CHARS
+            ):
+                return phrase
         return ""
 
     # Query only prioritizes order; always fall back across WHO/WHEN extractors so

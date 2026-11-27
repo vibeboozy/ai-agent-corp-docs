@@ -20,7 +20,7 @@ from typing import Any
 from app.adapters.embeddings.port import EmbeddingsClient
 from app.adapters.llm.port import LLMClient
 from app.adapters.vectorstore.port import VectorStore
-from app.application.text_util import lexical_overlap
+from app.application.text_util import lexical_overlap, lexical_relevance
 from app.domain.glossary import AbbreviationGlossary
 
 
@@ -96,7 +96,11 @@ class RetrievalService:
 
     def _blend_lexical(self, query: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """
-        Re-rank with vector score + lexical overlap; demote irrelevant mid-chunk hits.
+        Re-rank with vector score + prefix-aware lexical relevance.
+
+        Uses lexical_relevance (RU morphology prefixes) so near-identical questions
+        with different word forms still boost the matching clause. Exact Jaccard
+        overlap alone under-counted Russian morphology and demoted good hits.
 
         Preserves `vector_score` (raw) for min_score gating. Combined `score` is used
         only for ordering — never invents a perfect 1.0 from a lone weak hit.
@@ -111,9 +115,13 @@ class RetrievalService:
             raw = float(h.get("score") or 0.0)
             h["vector_score"] = raw
             vec_n = raw / max_vec
-            lex = lexical_overlap(query, str(h.get("text") or ""))
+            text = str(h.get("text") or "")
+            # Prefer morphology-aware relevance; keep exact overlap as a floor signal.
+            lex = max(lexical_relevance(query, text), lexical_overlap(query, text))
             locator = str(h.get("locator") or h.get("section_title") or "")
-            if locator and lexical_overlap(query, locator) > 0:
+            if locator and (
+                lexical_relevance(query, locator) > 0 or lexical_overlap(query, locator) > 0
+            ):
                 lex = min(1.0, lex + 0.25)
             h["lexical_score"] = lex
             # Demote high-vector / low-lexical mid-chunk noise (e.g. §17 vs §7.2).

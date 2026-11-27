@@ -15,6 +15,7 @@ DONT:
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,6 +38,12 @@ from app.domain.glossary import AbbreviationGlossary
 # Context-poor HybridChunker fragments (≈2–3 words) cannot ground a real answer.
 # Keep this low so short but complete clauses (5–6 tokens) still ground.
 _MIN_CHUNK_TOKENS = 4
+_WHEN_ASK_RE = re.compile(
+    r"(?i)\b(срок|когда|в\s+какой\s+срок|как\s+быстро)\b"
+)
+_TEMPORAL_CUE_RE = re.compile(
+    r"(?i)(?:в\s+течение|не\s+позднее|\d+\s+рабоч|\d+\s+календарн)"
+)
 
 
 @dataclass
@@ -67,6 +74,14 @@ class GroundingService:
     def _chunk_too_small(self, text: str) -> bool:
         return len(tokenize(text)) < _MIN_CHUNK_TOKENS
 
+    @staticmethod
+    def _when_ask(query: str | None) -> bool:
+        return bool(_WHEN_ASK_RE.search(query or ""))
+
+    @staticmethod
+    def _has_temporal_cue(text: str) -> bool:
+        return bool(_TEMPORAL_CUE_RE.search(text or ""))
+
     def ground(
         self,
         *,
@@ -84,11 +99,18 @@ class GroundingService:
         # Skip relevance gate when the query has no content tokens (e.g. "q" in unit tests).
         query_tokens = tokenize(query) if query else []
         apply_query_gate = bool(query_tokens) and self._min_query_overlap > 0
+        when_ask = self._when_ask(query)
 
         if apply_query_gate and usable:
             ranked = sorted(
                 usable,
                 key=lambda c: (
+                    # WHEN questions: prefer clauses that actually state a deadline.
+                    (
+                        1
+                        if when_ask and self._has_temporal_cue(str(c.get("text") or ""))
+                        else 0
+                    ),
                     lexical_relevance(query or "", str(c.get("text") or "")),
                     float(c.get("score") or 0.0),
                 ),
@@ -118,6 +140,17 @@ class GroundingService:
                 if lexical_relevance(query or "", str(c.get("text") or ""))
                 >= self._min_query_overlap
             ] or []
+            # WHEN with only neighbor passages (no deadline span) → escalate, do not
+            # invent a false Ответ / hit paraphrase_required on an off-topic quote.
+            if when_ask and usable and not any(
+                self._has_temporal_cue(str(c.get("text") or "")) for c in usable
+            ):
+                return GroundingResult(
+                    ok=False,
+                    citations=[],
+                    answer_text=None,
+                    reason="irrelevant_citations",
+                )
 
         if len(usable) < self._min_citations:
             # Distinguish empty/weak score pool from topical mismatch when possible.
@@ -145,9 +178,28 @@ class GroundingService:
                 reason=reason,
             )
 
-        top = usable[0]
+        draft_clean = strip_think_blocks(draft or "")
+        draft_for_overlap = (
+            extract_answer_body(draft_clean) or draft_clean if draft_clean else ""
+        )
+        # Prefer the usable chunk that actually supports the draft (or temporal cue),
+        # not merely retrieval rank — near-duplicate questions otherwise cite a neighbor.
+        def _support_key(c: dict[str, Any]) -> tuple[float, float, float]:
+            text = str(c.get("text") or "")
+            draft_hit = (
+                lexical_overlap(draft_for_overlap, text) if draft_for_overlap else 0.0
+            )
+            return (
+                draft_hit,
+                1.0 if when_ask and self._has_temporal_cue(text) else 0.0,
+                lexical_relevance(query or "", text) if apply_query_gate else 0.0,
+            )
+
+        top = max(usable, key=_support_key)
+        # Stable citation order: supporting top first, then remaining by support.
+        ordered = [top] + [c for c in usable if c is not top]
         citations = []
-        for c in usable[:3]:
+        for c in ordered[:3]:
             point = normalize_locator(
                 str(c.get("locator") or c.get("section_title") or "")
             )
@@ -168,13 +220,11 @@ class GroundingService:
         locator = normalize_locator(str(raw_locator) if raw_locator else None)
         quote = str(citations[0].get("quote") or top.get("text") or "")
         chunk_text = str(top.get("text") or "")
-        draft_clean = strip_think_blocks(draft or "")
         query_rel = (
             lexical_relevance(query or "", chunk_text) if apply_query_gate else 1.0
         )
         answer_body = ""
-        if draft_clean:
-            draft_for_overlap = extract_answer_body(draft_clean) or draft_clean
+        if draft_clean and draft_for_overlap:
             if lexical_overlap(draft_for_overlap, chunk_text) >= 0.15:
                 answer_body = enforce_short_paraphrase(
                     draft_clean, query=query or "", quote=quote
