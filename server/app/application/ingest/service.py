@@ -30,8 +30,27 @@ logger = logging.getLogger(__name__)
 
 
 def _local_text_chunks(*, text: str, job_id: str) -> list[dict[str, Any]]:
-    """Single/simple local chunk for short officer answers when Docling is unavailable."""
-    return [{"chunk_id": f"c-{job_id[:8]}", "text": text}]
+    """
+    Local chunks when Docling is unavailable.
+
+    Short officer answers stay a single chunk. Longer bodies go through the
+    same HybridChunker-style windows (DOCLING_CHUNK_* defaults) so learn
+    fallback cannot hand one giant string to embeddings.
+    """
+    body = text or ""
+    # ~min_tokens-ish: keep the single-chunk path for typical officer replies.
+    if len(body.split()) < 48:
+        return [{"chunk_id": f"c-{job_id[:8]}", "text": body}]
+    from app.adapters.docling.http import hybrid_chunk_text
+
+    converted = hybrid_chunk_text(body, source_path=None)
+    chunks = list(converted.get("chunks") or [])
+    if not chunks:
+        return [{"chunk_id": f"c-{job_id[:8]}", "text": body}]
+    # Stable ids tied to the learn job.
+    for idx, chunk in enumerate(chunks):
+        chunk["chunk_id"] = f"c-{job_id[:8]}" if idx == 0 else f"c-{job_id[:8]}-p{idx}"
+    return chunks
 
 
 class IngestService:

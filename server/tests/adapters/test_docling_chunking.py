@@ -74,3 +74,20 @@ def test_hybrid_chunk_merges_tiny_titled_sections() -> None:
     # Tiny 3.1 / 3.2 content survived by merging into a neighbor.
     joined = " ".join(c["text"] for c in chunks)
     assert "маржинальность" in joined.lower()
+
+
+def test_hybrid_chunk_merge_rewindows_to_max_tokens() -> None:
+    """Repeated tiny-section merges must not emit unbounded chunks (PR #20 regression)."""
+    parts = ["## 1. Введение\n" + " ".join(f"слово{i}" for i in range(400))]
+    for i in range(2, 200):
+        parts.append(f"{i}. короткий фрагмент номер {i}.")
+    body = "\n\n".join(parts)
+    out = hybrid_chunk_text(body, max_tokens=512, overlap_tokens=64, min_tokens=48)
+    chunks = out["chunks"]
+    assert chunks
+    assert all(c["token_count"] <= 512 for c in chunks), max(c["token_count"] for c in chunks)
+    # Tiny fragment content survived (re-windowed, not dropped).
+    joined = " ".join(c["text"] for c in chunks)
+    assert "короткий фрагмент номер 2" in joined
+    assert "короткий фрагмент номер 199" in joined
+    assert len(chunks) >= 2

@@ -8,9 +8,11 @@ DO:
 - HttpSourceRequest (kind=http, url) for remote URLs
 - Apply HybridChunker token window (max/overlap/min) after convert
 - Split local PDFs above DOCLING_PDF_SPLIT_PAGES via options.page_range + merge
+- Re-window after tiny-section merges so chunks never exceed max_tokens
 DONT:
 - POST legacy /convert or file_sources/http_sources fields (422 on 1.26)
 - Depend on docling-core for concatenate (page numbers shift)
+- Emit unbounded chunks from `_merge_into_prev` (always re-window)
 """
 
 from __future__ import annotations
@@ -143,16 +145,62 @@ def _merge_into_prev(
     *,
     tokens: list[str],
     section_title: str | None,
+    max_tokens: int,
+    overlap_tokens: int,
 ) -> None:
-    """Append a tiny section onto the previous chunk; keep section context."""
-    prev = chunks[-1]
-    piece = " ".join(tokens).strip()
-    if section_title and section_title not in prev.get("text", ""):
+    """
+    Append a tiny section onto the previous chunk; keep section context.
+
+    Always re-window by max_tokens after the append so repeated tiny-section
+    merges (PR #20 grounding) cannot grow past DOCLING_CHUNK_MAX_TOKENS.
+    Uses min_tokens=1 on the re-window so the merged content is never dropped.
+    """
+    if not chunks or not tokens:
+        return
+    prev = chunks.pop()
+    prev_tokens = _approx_tokens(str(prev.get("text") or ""))
+    extra = list(tokens)
+    if section_title and section_title not in str(prev.get("text") or ""):
         # Keep locator of the richer previous chunk; expose title in body.
-        piece = f"{section_title} {piece}".strip()
-    merged = f"{prev['text']} {piece}".strip()
-    prev["text"] = merged
-    prev["token_count"] = len(_approx_tokens(merged))
+        extra = _approx_tokens(section_title) + extra
+    merged_tokens = prev_tokens + extra
+    # Prefer previous locator (richer context); fall back to the tiny title.
+    locator = prev.get("section_title") or section_title
+    chunks.extend(
+        _window_tokens(
+            merged_tokens,
+            max_tokens=max_tokens,
+            overlap_tokens=overlap_tokens,
+            min_tokens=1,
+            section_title=locator if isinstance(locator, str) else section_title,
+        )
+    )
+
+
+def _enforce_max_tokens(
+    chunks: list[dict[str, Any]],
+    *,
+    max_tokens: int,
+    overlap_tokens: int,
+) -> list[dict[str, Any]]:
+    """Final pass: re-window any chunk that somehow exceeds max_tokens."""
+    out: list[dict[str, Any]] = []
+    for chunk in chunks:
+        tokens = _approx_tokens(str(chunk.get("text") or ""))
+        if len(tokens) <= max_tokens:
+            chunk["token_count"] = len(tokens) if tokens else int(chunk.get("token_count") or 0)
+            out.append(chunk)
+            continue
+        out.extend(
+            _window_tokens(
+                tokens,
+                max_tokens=max_tokens,
+                overlap_tokens=overlap_tokens,
+                min_tokens=1,
+                section_title=chunk.get("section_title"),
+            )
+        )
+    return out
 
 
 def hybrid_chunk_text(
@@ -173,6 +221,7 @@ def hybrid_chunk_text(
 
     Tiny sections (below min_tokens) — titled or not — merge into neighbors
     so retrieval never surfaces few-word context-poor chunks as answers.
+    Merges always re-window by max_tokens (never emit unbounded chunks).
     """
     max_tokens = max(1, int(max_tokens))
     overlap_tokens = max(0, min(int(overlap_tokens), max_tokens - 1))
@@ -202,7 +251,13 @@ def hybrid_chunk_text(
         # Tiny fragments (with or without a title) never stand alone.
         if len(tokens) < min_tokens:
             if chunks:
-                _merge_into_prev(chunks, tokens=tokens, section_title=section_title)
+                _merge_into_prev(
+                    chunks,
+                    tokens=tokens,
+                    section_title=section_title,
+                    max_tokens=max_tokens,
+                    overlap_tokens=overlap_tokens,
+                )
             else:
                 pending.append((section_title, tokens))
             continue
@@ -217,7 +272,7 @@ def hybrid_chunk_text(
             )
         )
 
-    # Trailing tiny-only document: emit one merged chunk rather than drop.
+    # Trailing tiny-only document: merge then re-window rather than drop.
     if pending:
         title = pending[0][0]
         merged_tokens: list[str] = []
@@ -226,7 +281,13 @@ def hybrid_chunk_text(
                 merged_tokens.append(t)
             merged_tokens.extend(toks)
         if chunks:
-            _merge_into_prev(chunks, tokens=merged_tokens, section_title=title)
+            _merge_into_prev(
+                chunks,
+                tokens=merged_tokens,
+                section_title=title,
+                max_tokens=max_tokens,
+                overlap_tokens=overlap_tokens,
+            )
         else:
             chunks.extend(
                 _window_tokens(
@@ -237,6 +298,10 @@ def hybrid_chunk_text(
                     section_title=title,
                 )
             )
+
+    chunks = _enforce_max_tokens(
+        chunks, max_tokens=max_tokens, overlap_tokens=overlap_tokens
+    )
 
     return {
         "source_path": source_path,

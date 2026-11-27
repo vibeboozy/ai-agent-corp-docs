@@ -123,6 +123,22 @@ async def test_ingest_text_falls_back_when_docling_returns_empty_chunks() -> Non
 
 
 @pytest.mark.asyncio
+async def test_ingest_text_local_fallback_windows_long_officer_text() -> None:
+    """Long learn text without Docling must not become one giant embed input."""
+    docling = _DownDocling(AppError("Docling upstream error", code="UPSTREAM_ERROR"))
+    svc, upserted, embeddings, _persistence = _build_service(docling=docling)
+
+    long_answer = " ".join(f"слово{i}" for i in range(600))
+    result = await svc.ingest_text(text=long_answer)
+
+    assert result["chunking"] == "local_fallback"
+    assert result["chunks"] >= 2
+    dense_texts = embeddings.embed_dense.await_args.args[0]
+    assert all(len(t.split()) <= 512 for t in dense_texts)
+    assert len(upserted) == result["chunks"]
+
+
+@pytest.mark.asyncio
 async def test_ingest_text_uses_docling_chunks_when_available() -> None:
     class _OkDocling:
         async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict:
