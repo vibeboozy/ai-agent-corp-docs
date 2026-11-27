@@ -85,7 +85,17 @@ class Settings(BaseSettings):
     docling_timeout_s: float = Field(default=300.0, alias="DOCLING_TIMEOUT_S")
     docling_connect_timeout_s: float = Field(default=30.0, alias="DOCLING_CONNECT_TIMEOUT_S")
     docling_concurrency: int = Field(default=2, alias="DOCLING_CONCURRENCY")
+    # Inject <!-- page-break --> into markdown (HybridChunker section boundaries).
     docling_split_pages: bool = Field(default=True, alias="DOCLING_SPLIT_PAGES")
+    # Local PDFs with more pages than this are converted via options.page_range
+    # chunks (default 40 — empirical Docling Serve timeout on long single jobs).
+    # Set 0 to disable range splitting. Distinct from DOCLING_SPLIT_PAGES (bool).
+    docling_pdf_split_pages: int = Field(default=40, alias="DOCLING_PDF_SPLIT_PAGES")
+    # Optional on-disk cache for per-range convert payloads (empty = disabled).
+    # Example: .cache/docling/parts
+    docling_pdf_part_cache_dir: str | None = Field(
+        default=None, alias="DOCLING_PDF_PART_CACHE_DIR"
+    )
     docling_ocr_langs: str = Field(default="ru,en", alias="DOCLING_OCR_LANGS")
     docling_chunker: str = Field(default="HybridChunker", alias="DOCLING_CHUNKER")
     docling_chunk_tokenizer: str = Field(

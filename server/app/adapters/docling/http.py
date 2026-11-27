@@ -1,20 +1,23 @@
 """
 ANCHOR: app.adapters.docling.HttpDoclingClient
 PURPOSE: HTTP Docling convert client with OCR options + HybridChunker-style chunking.
-Dependencies: httpx; Settings DOCLING_*
+Dependencies: httpx; Settings DOCLING_*; pdf_split for large local PDFs
 CRITICAL: Docling Serve ≥1.x uses POST /v1/convert/source with sources[].
 DO:
 - FileSourceRequest (kind=file, base64_string, filename) for local/docx/text
 - HttpSourceRequest (kind=http, url) for remote URLs
 - Apply HybridChunker token window (max/overlap/min) after convert
+- Split local PDFs above DOCLING_PDF_SPLIT_PAGES via options.page_range + merge
 DONT:
 - POST legacy /convert or file_sources/http_sources fields (422 on 1.26)
+- Depend on docling-core for concatenate (page numbers shift)
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -23,8 +26,19 @@ from uuid import uuid4
 
 import httpx
 
+from app.adapters.docling.pdf_split import (
+    PartCache,
+    extract_json_content,
+    merge_part_json_contents,
+    merge_part_markdown,
+    page_ranges,
+    pdf_page_count,
+    should_split_pdf,
+)
 from app.adapters.docling.port import DoclingClient
 from app.domain.errors import AppError, UpstreamTimeoutError
+
+logger = logging.getLogger(__name__)
 
 
 def _approx_tokens(text: str) -> list[str]:
@@ -215,6 +229,8 @@ class HttpDoclingClient:
         connect_timeout_s: float = 30.0,
         concurrency: int = 2,
         split_pages: bool = True,
+        pdf_split_pages: int = 40,
+        pdf_part_cache_dir: str | None = None,
         ocr_langs: str = "ru,en",
         chunker: str = "HybridChunker",
         chunk_tokenizer: str = "BAAI/bge-m3",
@@ -229,6 +245,10 @@ class HttpDoclingClient:
         self._connect_timeout = connect_timeout_s
         self._semaphore = asyncio.Semaphore(max(1, int(concurrency)))
         self._split_pages = split_pages
+        # Max pages per Docling request for local PDFs; 0 disables range splitting.
+        self._pdf_split_pages = max(0, int(pdf_split_pages))
+        cache_dir = (pdf_part_cache_dir or "").strip()
+        self._part_cache = PartCache(Path(cache_dir)) if cache_dir else None
         self._ocr_langs = [p.strip() for p in (ocr_langs or "").split(",") if p.strip()]
         self._chunker = chunker
         self._chunk_tokenizer = chunk_tokenizer
@@ -253,16 +273,27 @@ class HttpDoclingClient:
             headers["Authorization"] = f"Bearer {self._api_key}"
         return headers
 
-    def _convert_options(self) -> dict[str, Any]:
+    def _page_break_placeholder(self) -> str:
+        return "\n\n<!-- page-break -->\n\n"
+
+    def _convert_options(
+        self, *, page_range: tuple[int, int] | None = None, include_json: bool = False
+    ) -> dict[str, Any]:
+        formats = ["md", "text"]
+        if include_json:
+            formats.append("json")
         options: dict[str, Any] = {
-            "to_formats": ["md", "text"],
+            "to_formats": formats,
             "do_ocr": bool(self._ocr_langs),
         }
         if self._ocr_langs:
             options["ocr_lang"] = list(self._ocr_langs)
         if self._split_pages:
             # Page-break placeholder helps HybridChunker keep section boundaries.
-            options["md_page_break_placeholder"] = "\n\n<!-- page-break -->\n\n"
+            options["md_page_break_placeholder"] = self._page_break_placeholder()
+        if page_range is not None:
+            start, end = page_range
+            options["page_range"] = [int(start), int(end)]
         return options
 
     def _build_sources(
@@ -282,6 +313,17 @@ class HttpDoclingClient:
             return [{"kind": "file", "base64_string": b64, "filename": "inline.txt"}]
         raise AppError("Docling convert requires source_path or text", code="VALIDATION_ERROR")
 
+    def _local_pdf_path(self, source_path: str | None) -> Path | None:
+        if not source_path:
+            return None
+        parsed = urlparse(source_path)
+        if parsed.scheme in ("http", "https"):
+            return None
+        path = Path(source_path)
+        if path.is_file() and path.suffix.lower() == ".pdf":
+            return path
+        return None
+
     async def ping(self) -> bool:
         headers = self._headers()
         try:
@@ -297,12 +339,7 @@ class HttpDoclingClient:
         except httpx.HTTPError as exc:
             raise AppError("Docling ping failed", code="UPSTREAM_ERROR") from exc
 
-    async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict[str, Any]:
-        sources = self._build_sources(source_path=source_path, text=text)
-        payload: dict[str, Any] = {
-            "sources": sources,
-            "options": self._convert_options(),
-        }
+    async def _post_convert(self, payload: dict[str, Any]) -> dict[str, Any]:
         async with self._semaphore:
             try:
                 async with httpx.AsyncClient(timeout=self._httpx_timeout()) as client:
@@ -326,10 +363,17 @@ class HttpDoclingClient:
                 raise UpstreamTimeoutError("Docling request timed out") from exc
             except httpx.HTTPError as exc:
                 raise AppError("Docling upstream error", code="UPSTREAM_ERROR") from exc
+        return data if isinstance(data, dict) else {"raw": data}
 
-        body = _extract_text(data if isinstance(data, dict) else {})
-        if not body and text:
-            body = text
+    def _finalize(
+        self,
+        *,
+        body: str,
+        source_path: str | None,
+        raw: Any,
+        options: dict[str, Any],
+        extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         result = hybrid_chunk_text(
             body,
             source_path=source_path,
@@ -339,9 +383,115 @@ class HttpDoclingClient:
             overlap_tokens=self._chunk_overlap_tokens,
             min_tokens=self._chunk_min_tokens,
         )
-        result["raw"] = data
-        result["options"] = payload["options"]
+        result["raw"] = raw
+        result["options"] = options
+        if extra:
+            result.update(extra)
         return result
+
+    async def _convert_pdf_parts(self, path: Path) -> dict[str, Any]:
+        n_pages = pdf_page_count(path)
+        threshold = self._pdf_split_pages
+        ranges = page_ranges(n_pages, threshold)
+        logger.info(
+            "Docling PDF split: path=%s pages=%s threshold=%s parts=%s",
+            path.name,
+            n_pages,
+            threshold,
+            len(ranges),
+        )
+        sources = self._build_sources(source_path=str(path), text=None)
+        digest = PartCache.file_digest(path) if self._part_cache else ""
+        page_break = self._page_break_placeholder()
+
+        async def _one(start: int, end: int) -> tuple[int, int, str, Any, dict[str, Any]]:
+            cached = (
+                self._part_cache.load(digest=digest, start=start, end=end)
+                if self._part_cache
+                else None
+            )
+            if cached is not None:
+                data = cached.get("raw") if isinstance(cached.get("raw"), dict) else cached
+                body = str(cached.get("text") or "")
+                if not body and isinstance(data, dict):
+                    body = _extract_text(data)
+                return start, end, body, data if isinstance(data, dict) else {}, cached
+
+            options = self._convert_options(page_range=(start, end), include_json=True)
+            payload = {"sources": sources, "options": options}
+            data = await self._post_convert(payload)
+            body = _extract_text(data)
+            if self._part_cache:
+                self._part_cache.store(
+                    digest=digest,
+                    start=start,
+                    end=end,
+                    payload={"text": body, "raw": data, "page_range": [start, end]},
+                )
+            return start, end, body, data, options
+
+        # Parallelism capped by DOCLING_CONCURRENCY via the shared semaphore.
+        part_results = await asyncio.gather(*[_one(s, e) for s, e in ranges])
+        md_parts = [(s, e, text) for s, e, text, _data, _opts in part_results]
+        body = merge_part_markdown(md_parts, page_break=page_break)
+        json_parts = [
+            (s, e, extract_json_content(data if isinstance(data, dict) else None))
+            for s, e, _text, data, _opts in part_results
+        ]
+        merged_json = merge_part_json_contents(json_parts)
+        options = self._convert_options(include_json=True)
+        options["page_ranges"] = [[s, e] for s, e in ranges]
+        raw = {
+            "document": {
+                "md_content": body,
+                "text_content": body,
+                "json_parts": merged_json,
+            },
+            "pdf_split": {
+                "n_pages": n_pages,
+                "threshold": threshold,
+                "page_ranges": [[s, e] for s, e in ranges],
+                "parts": len(ranges),
+                "cache": bool(self._part_cache),
+            },
+        }
+        return self._finalize(
+            body=body,
+            source_path=str(path),
+            raw=raw,
+            options=options,
+            extra={"pdf_split": raw["pdf_split"]},
+        )
+
+    async def convert(self, *, source_path: str | None = None, text: str | None = None) -> dict[str, Any]:
+        local_pdf = self._local_pdf_path(source_path)
+        if local_pdf is not None and self._pdf_split_pages > 0:
+            try:
+                n_pages = pdf_page_count(local_pdf)
+            except Exception as exc:
+                raise AppError(
+                    f"Failed to read PDF page count: {local_pdf}",
+                    code="VALIDATION_ERROR",
+                ) from exc
+            if should_split_pdf(n_pages=n_pages, threshold=self._pdf_split_pages):
+                return await self._convert_pdf_parts(local_pdf)
+
+        sources = self._build_sources(source_path=source_path, text=text)
+        options = self._convert_options()
+        payload: dict[str, Any] = {
+            "sources": sources,
+            "options": options,
+        }
+        data = await self._post_convert(payload)
+        body = _extract_text(data)
+        if not body and text:
+            body = text
+        return self._finalize(
+            body=body,
+            source_path=source_path,
+            raw=data,
+            options=options,
+        )
 
 
 _: DoclingClient = HttpDoclingClient(  # type: ignore[assignment]
