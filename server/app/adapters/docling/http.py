@@ -96,15 +96,12 @@ def _window_tokens(
     if not tokens:
         return chunks
     if len(tokens) <= max_tokens:
-        # Still emit when caller forced min_tokens=1 (trailing merge fallback).
         text = " ".join(tokens)
-        if section_title and section_title not in text and len(tokens) < max(8, min_tokens // 2):
-            text = f"{section_title} {text}".strip()
         chunks.append(
             {
                 "chunk_id": f"docling-{uuid4().hex[:8]}",
                 "text": text,
-                "token_count": len(_approx_tokens(text)),
+                "token_count": len(tokens),
                 "section_title": section_title,
                 "locator": section_title,
             }
@@ -138,23 +135,6 @@ def _window_tokens(
     return chunks
 
 
-def _merge_into_prev(
-    chunks: list[dict[str, Any]],
-    *,
-    tokens: list[str],
-    section_title: str | None,
-) -> None:
-    """Append a tiny section onto the previous chunk; keep section context."""
-    prev = chunks[-1]
-    piece = " ".join(tokens).strip()
-    if section_title and section_title not in prev.get("text", ""):
-        # Keep locator of the richer previous chunk; expose title in body.
-        piece = f"{section_title} {piece}".strip()
-    merged = f"{prev['text']} {piece}".strip()
-    prev["text"] = merged
-    prev["token_count"] = len(_approx_tokens(merged))
-
-
 def hybrid_chunk_text(
     body: str,
     *,
@@ -163,50 +143,29 @@ def hybrid_chunk_text(
     tokenizer: str = "BAAI/bge-m3",
     max_tokens: int = 512,
     overlap_tokens: int = 64,
-    min_tokens: int = 48,
+    min_tokens: int = 32,
 ) -> dict[str, Any]:
     """
     Section-aware HybridChunker-style windows from DOCLING_CHUNK_* env.
 
     Splits on regulation headings / numbered clauses first, then applies
     overlapping token windows inside each section (sentence-end bias).
-
-    Tiny sections (below min_tokens) — titled or not — merge into neighbors
-    so retrieval never surfaces few-word context-poor chunks as answers.
     """
     max_tokens = max(1, int(max_tokens))
     overlap_tokens = max(0, min(int(overlap_tokens), max_tokens - 1))
     min_tokens = max(1, int(min_tokens))
     chunks: list[dict[str, Any]] = []
-    # Buffer leading tiny sections until we have a neighbor to merge into.
-    pending: list[tuple[str | None, list[str]]] = []
-
-    def _flush_pending_into(tokens: list[str], section_title: str | None) -> list[str]:
-        nonlocal pending
-        if not pending:
-            return tokens
-        prefix_parts: list[str] = []
-        for title, toks in pending:
-            if title:
-                prefix_parts.append(title)
-            prefix_parts.extend(toks)
-        pending = []
-        # Prefer keeping the destination section title as locator.
-        _ = section_title
-        return prefix_parts + list(tokens)
-
     for section_title, section_body in split_sections(body):
         tokens = _approx_tokens(section_body)
         if not tokens:
             continue
-        # Tiny fragments (with or without a title) never stand alone.
-        if len(tokens) < min_tokens:
-            if chunks:
-                _merge_into_prev(chunks, tokens=tokens, section_title=section_title)
-            else:
-                pending.append((section_title, tokens))
+        # Tiny orphan fragments attach to previous chunk when possible.
+        if len(tokens) < min_tokens and chunks and section_title is None:
+            prev = chunks[-1]
+            merged = f"{prev['text']} {' '.join(tokens)}".strip()
+            prev["text"] = merged
+            prev["token_count"] = len(_approx_tokens(merged))
             continue
-        tokens = _flush_pending_into(tokens, section_title)
         chunks.extend(
             _window_tokens(
                 tokens,
@@ -216,27 +175,6 @@ def hybrid_chunk_text(
                 section_title=section_title,
             )
         )
-
-    # Trailing tiny-only document: emit one merged chunk rather than drop.
-    if pending:
-        title = pending[0][0]
-        merged_tokens: list[str] = []
-        for t, toks in pending:
-            if t:
-                merged_tokens.append(t)
-            merged_tokens.extend(toks)
-        if chunks:
-            _merge_into_prev(chunks, tokens=merged_tokens, section_title=title)
-        else:
-            chunks.extend(
-                _window_tokens(
-                    merged_tokens,
-                    max_tokens=max_tokens,
-                    overlap_tokens=overlap_tokens,
-                    min_tokens=1,
-                    section_title=title,
-                )
-            )
 
     return {
         "source_path": source_path,
@@ -298,7 +236,7 @@ class HttpDoclingClient:
         chunk_tokenizer: str = "BAAI/bge-m3",
         chunk_max_tokens: int = 512,
         chunk_overlap_tokens: int = 64,
-        chunk_min_tokens: int = 48,
+        chunk_min_tokens: int = 32,
         allow_hosts: set[str] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
