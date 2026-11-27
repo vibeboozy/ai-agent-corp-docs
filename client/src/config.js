@@ -30,7 +30,7 @@ export const DEMO_PROMPTS = [
 ];
 
 export const CONFIG = {
-  DEFAULT_MODE: 'mock', // 'mock' | 'api'
+  DEFAULT_MODE: 'api', // 'mock' | 'api'
   DEFAULT_API_BASE_URL: '/api/v1',
   STORAGE_KEYS: {
     MODE: 'sq_agent_mode',
