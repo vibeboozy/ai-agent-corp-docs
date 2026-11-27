@@ -6,10 +6,11 @@ CRITICAL: Final answers MUST be chunk-supported (ANC-GROUND-01/02).
 DO:
 - Prefer short human WHO/WHAT/WHEN paraphrase + authoritative Источник/Цитата
 - Expand known abbreviations in Ответ when glossary active
-- Refuse or escalate unsupported claims
+- Refuse or escalate unsupported / irrelevant / weak hits
 DONT:
 - Dump / truncate regulation prose as Ответ
 - Put full clause text into Источник
+- Answer from a quote that does not address the question
 """
 
 from __future__ import annotations
@@ -26,10 +27,16 @@ from app.application.dialogue.answer_format import (
 )
 from app.application.text_util import (
     lexical_overlap,
+    lexical_relevance,
     quote_at_boundary,
     strip_think_blocks,
+    tokenize,
 )
 from app.domain.glossary import AbbreviationGlossary
+
+# Context-poor HybridChunker fragments (≈2–3 words) cannot ground a real answer.
+# Keep this low so short but complete clauses (5–6 tokens) still ground.
+_MIN_CHUNK_TOKENS = 4
 
 
 @dataclass
@@ -42,18 +49,23 @@ class GroundingResult:
 
 
 class GroundingService:
-    """Require min citations above score threshold; build human-readable answers."""
+    """Require min citations above score + query relevance; build human answers."""
 
     def __init__(
         self,
         *,
         min_citations: int = 1,
         min_score: float = 0.0,
+        min_query_overlap: float = 0.12,
         glossary: AbbreviationGlossary | None = None,
     ) -> None:
         self._min_citations = min_citations
         self._min_score = min_score
+        self._min_query_overlap = max(0.0, float(min_query_overlap))
         self._glossary = glossary
+
+    def _chunk_too_small(self, text: str) -> bool:
+        return len(tokenize(text)) < _MIN_CHUNK_TOKENS
 
     def ground(
         self,
@@ -65,34 +77,72 @@ class GroundingService:
         usable = [
             c
             for c in candidates
-            if float(c.get("score") or 0.0) >= self._min_score and c.get("text")
+            if float(c.get("score") or 0.0) >= self._min_score
+            and c.get("text")
+            and not self._chunk_too_small(str(c.get("text") or ""))
         ]
-        if query and usable:
+        # Skip relevance gate when the query has no content tokens (e.g. "q" in unit tests).
+        query_tokens = tokenize(query) if query else []
+        apply_query_gate = bool(query_tokens) and self._min_query_overlap > 0
+
+        if apply_query_gate and usable:
             ranked = sorted(
                 usable,
                 key=lambda c: (
-                    lexical_overlap(query, str(c.get("text") or "")),
+                    lexical_relevance(query or "", str(c.get("text") or "")),
                     float(c.get("score") or 0.0),
                 ),
                 reverse=True,
             )
-            best_lex = lexical_overlap(query, str(ranked[0].get("text") or ""))
-            if best_lex > 0:
-                usable = [
-                    c
-                    for c in ranked
-                    if lexical_overlap(query, str(c.get("text") or "")) >= best_lex * 0.35
-                    or float(c.get("score") or 0.0) >= float(ranked[0].get("score") or 0.0)
-                ] or ranked
-            else:
-                usable = ranked
+            best_rel = lexical_relevance(query or "", str(ranked[0].get("text") or ""))
+            # Weak / off-topic hits (e.g. budget approval for a margin-% question)
+            # must escalate — never become a grounded "answer".
+            if best_rel < self._min_query_overlap:
+                return GroundingResult(
+                    ok=False,
+                    citations=[],
+                    answer_text=None,
+                    reason="irrelevant_citations",
+                )
+            usable = [
+                c
+                for c in ranked
+                if lexical_relevance(query or "", str(c.get("text") or ""))
+                >= max(self._min_query_overlap, best_rel * 0.35)
+                or float(c.get("score") or 0.0) >= float(ranked[0].get("score") or 0.0)
+            ] or ranked
+            # Keep only passages that still clear the query-relevance floor.
+            usable = [
+                c
+                for c in usable
+                if lexical_relevance(query or "", str(c.get("text") or ""))
+                >= self._min_query_overlap
+            ] or []
 
         if len(usable) < self._min_citations:
+            # Distinguish empty/weak score pool from topical mismatch when possible.
+            scored = [
+                c
+                for c in candidates
+                if float(c.get("score") or 0.0) >= self._min_score and c.get("text")
+            ]
+            reason = "insufficient_citations"
+            if apply_query_gate and scored and not usable:
+                # All scored hits were tiny or below query-overlap.
+                any_rel = max(
+                    (
+                        lexical_relevance(query or "", str(c.get("text") or ""))
+                        for c in scored
+                    ),
+                    default=0.0,
+                )
+                if any_rel < self._min_query_overlap:
+                    reason = "irrelevant_citations"
             return GroundingResult(
                 ok=False,
                 citations=[],
                 answer_text=None,
-                reason="insufficient_citations",
+                reason=reason,
             )
 
         top = usable[0]
@@ -119,6 +169,9 @@ class GroundingService:
         quote = str(citations[0].get("quote") or top.get("text") or "")
         chunk_text = str(top.get("text") or "")
         draft_clean = strip_think_blocks(draft or "")
+        query_rel = (
+            lexical_relevance(query or "", chunk_text) if apply_query_gate else 1.0
+        )
         answer_body = ""
         if draft_clean:
             draft_for_overlap = extract_answer_body(draft_clean) or draft_clean
@@ -126,10 +179,20 @@ class GroundingService:
                 answer_body = enforce_short_paraphrase(
                     draft_clean, query=query or "", quote=quote
                 )
+        # Only invent an Ответ from the chunk when it is actually about the question.
+        # UNSUPPORTED / missing draft + off-topic quote → escalate (not a false answer).
         if not answer_body:
-            answer_body = enforce_short_paraphrase(
-                chunk_text, query=query or "", quote=quote
-            )
+            if (not apply_query_gate) or query_rel >= self._min_query_overlap:
+                answer_body = enforce_short_paraphrase(
+                    chunk_text, query=query or "", quote=quote
+                )
+            else:
+                return GroundingResult(
+                    ok=False,
+                    citations=citations,
+                    answer_text=None,
+                    reason="irrelevant_citations",
+                )
 
         answer = format_human_answer(
             answer=answer_body,
@@ -149,6 +212,14 @@ class GroundingService:
                 reason="paraphrase_required",
             )
         final_body = extract_answer_body(answer) or ""
+        # Final guard: quote/answer must still be about the question.
+        if apply_query_gate and query_rel < self._min_query_overlap:
+            return GroundingResult(
+                ok=False,
+                citations=citations,
+                answer_text=None,
+                reason="irrelevant_citations",
+            )
         return GroundingResult(
             ok=True,
             citations=citations,

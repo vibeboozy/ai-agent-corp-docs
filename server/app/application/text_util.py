@@ -83,6 +83,42 @@ def lexical_overlap(query: str, text: str) -> float:
     return len(q & t) / float(len(q))
 
 
+def _token_prefixes(tokens: set[str] | list[str], *, size: int = 6) -> set[str]:
+    """Light stem stand-in: prefixes of longer tokens (RU morphology)."""
+    out: set[str] = set()
+    for tok in tokens:
+        if len(tok) >= 5:
+            out.add(tok[:size])
+        else:
+            out.add(tok)
+    return out
+
+
+def lexical_relevance(query: str, text: str) -> float:
+    """
+    Query→passage relevance with light prefix matching.
+
+    Exact token overlap alone under-counts Russian morphology
+    (маржинальности vs маржинальность). Used for grounding gates so
+    weak/irrelevant hits escalate instead of becoming false answers.
+    """
+    q = tokenize(query)
+    if not q:
+        return 0.0
+    t = tokenize(text)
+    if not t:
+        return 0.0
+    t_set = set(t)
+    t_pref = _token_prefixes(t_set)
+    hits = 0
+    for tok in q:
+        if tok in t_set:
+            hits += 1
+        elif len(tok) >= 5 and tok[:6] in t_pref:
+            hits += 1
+    return hits / float(len(q))
+
+
 def truncate_at_sentence(text: str, max_len: int = 480) -> str:
     """
     Truncate without cutting mid-sentence when possible.

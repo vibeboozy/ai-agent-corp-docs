@@ -184,6 +184,7 @@ def build_container(settings: Settings | None = None) -> Container:
     grounding = GroundingService(
         min_citations=settings.grounding_min_citations,
         min_score=settings.grounding_min_score,
+        min_query_overlap=settings.grounding_min_query_overlap,
         glossary=glossary,
     )
     quality = QualityEscalationService(

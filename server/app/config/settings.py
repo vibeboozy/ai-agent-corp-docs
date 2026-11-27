@@ -105,7 +105,7 @@ class Settings(BaseSettings):
     docling_chunk_overlap_tokens: int = Field(
         default=64, alias="DOCLING_CHUNK_OVERLAP_TOKENS"
     )
-    docling_chunk_min_tokens: int = Field(default=32, alias="DOCLING_CHUNK_MIN_TOKENS")
+    docling_chunk_min_tokens: int = Field(default=48, alias="DOCLING_CHUNK_MIN_TOKENS")
 
     # --- libreoffice ---
     libreoffice_soffice_path: str = Field(default="soffice", alias="LIBREOFFICE_SOFFICE_PATH")
@@ -125,7 +125,12 @@ class Settings(BaseSettings):
     retrieval_lexical_weight: float = Field(default=0.35, alias="RETRIEVAL_LEXICAL_WEIGHT")
     dialogue_max_clarify_turns: int = Field(default=3, alias="DIALOGUE_MAX_CLARIFY_TURNS")
     grounding_min_citations: int = Field(default=1, alias="GROUNDING_MIN_CITATIONS")
-    grounding_min_score: float = Field(default=0.0, alias="GROUNDING_MIN_SCORE")
+    # Soft floor on blended retrieval score; query-overlap is the main weak-hit gate.
+    grounding_min_score: float = Field(default=0.25, alias="GROUNDING_MIN_SCORE")
+    # Min query↔chunk relevance (prefix-aware). Below this → escalate, do not answer.
+    grounding_min_query_overlap: float = Field(
+        default=0.12, alias="GROUNDING_MIN_QUERY_OVERLAP"
+    )
     # Extra in-domain topics beyond corporate regulations (labels / label=description).
     # Used by off-topic heuristic, classify prompt, and refusal text. Docs must be ingested.
     allowed_topics: str | None = Field(default=None, alias="ALLOWED_TOPICS")
