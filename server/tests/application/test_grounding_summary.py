@@ -102,7 +102,7 @@ def test_ground_answer_stops_before_next_numbered_clause() -> None:
     assert "**10" not in answer
     assert "**9.5" not in answer.splitlines()[0]
     assert not answer.rstrip().endswith("**10.")
-    assert result.citations[0]["locator"] == "9.5."
+    assert result.citations[0]["locator"] == "9.5"
     quote = result.citations[0]["quote"] or ""
     assert "**10" not in quote
 

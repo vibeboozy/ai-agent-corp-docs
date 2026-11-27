@@ -4,13 +4,12 @@ PURPOSE: Citation check; refuse unsupported claims (ANC-GROUND-01/02).
 Dependencies: domain ChunkCitation; settings thresholds; text_util; answer_format; glossary
 CRITICAL: Final answers MUST be chunk-supported (ANC-GROUND-01/02).
 DO:
-- Prefer short human Ответ + authoritative Источник/Цитата from citations
+- Prefer short human WHO/WHAT/WHEN paraphrase + authoritative Источник/Цитата
 - Expand known abbreviations in Ответ when glossary active
 - Refuse or escalate unsupported claims
 DONT:
-- Treat LLM draft as sole source of truth without chunk overlap
-- Dump raw regulation prose / clause numbers as Ответ
-- Set Ответ equal to the full цитата
+- Dump / truncate regulation prose as Ответ
+- Put full clause text into Источник
 """
 
 from __future__ import annotations
@@ -19,10 +18,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.application.dialogue.answer_format import (
+    enforce_short_paraphrase,
     extract_answer_body,
     format_human_answer,
-    is_near_quote_duplicate,
-    normalize_short_answer,
+    needs_paraphrase_repair,
+    normalize_locator,
 )
 from app.application.text_util import (
     lexical_overlap,
@@ -38,6 +38,7 @@ class GroundingResult:
     citations: list[dict[str, Any]]
     answer_text: str | None
     reason: str | None = None
+    needs_repair: bool = False
 
 
 class GroundingService:
@@ -66,7 +67,6 @@ class GroundingService:
             for c in candidates
             if float(c.get("score") or 0.0) >= self._min_score and c.get("text")
         ]
-        # Prefer candidates that actually share tokens with the question.
         if query and usable:
             ranked = sorted(
                 usable,
@@ -76,7 +76,6 @@ class GroundingService:
                 ),
                 reverse=True,
             )
-            # Drop near-zero lexical overlap when a better match exists.
             best_lex = lexical_overlap(query, str(ranked[0].get("text") or ""))
             if best_lex > 0:
                 usable = [
@@ -97,41 +96,62 @@ class GroundingService:
             )
 
         top = usable[0]
-        citations = [
-            {
-                "document_id": c["document_id"],
-                "chunk_id": c["chunk_id"],
-                "quote": quote_at_boundary(str(c["text"]), 400),
-                "score": float(c.get("score") or 0.0),
-                "document_title": c.get("document_title"),
-                "locator": c.get("locator") or c.get("section_title"),
-            }
-            for c in usable[:3]
-        ]
+        citations = []
+        for c in usable[:3]:
+            point = normalize_locator(
+                str(c.get("locator") or c.get("section_title") or "")
+            )
+            citations.append(
+                {
+                    "document_id": c["document_id"],
+                    "chunk_id": c["chunk_id"],
+                    "quote": quote_at_boundary(str(c["text"]), 400),
+                    "score": float(c.get("score") or 0.0),
+                    "document_title": c.get("document_title"),
+                    # Point number only — never the full clause sentence.
+                    "locator": point,
+                }
+            )
 
         title = str(top.get("document_title") or top["document_id"])
-        locator = top.get("locator") or top.get("section_title")
+        raw_locator = top.get("locator") or top.get("section_title")
+        locator = normalize_locator(str(raw_locator) if raw_locator else None)
         quote = str(citations[0].get("quote") or top.get("text") or "")
         chunk_text = str(top.get("text") or "")
-        # Strip CoT wrappers even if a Fake/bypass LLM skipped HttpLLMClient.complete().
         draft_clean = strip_think_blocks(draft or "")
         answer_body = ""
-        # Prefer LLM draft only when it overlaps the supporting chunk (grounded).
         if draft_clean:
             draft_for_overlap = extract_answer_body(draft_clean) or draft_clean
             if lexical_overlap(draft_for_overlap, chunk_text) >= 0.15:
-                answer_body = normalize_short_answer(draft_clean, quote=quote)
+                answer_body = enforce_short_paraphrase(
+                    draft_clean, query=query or "", quote=quote
+                )
         if not answer_body:
-            # Fallback: short cleaned fragment — never dump full regulation prose as Ответ.
-            answer_body = normalize_short_answer(chunk_text, quote=quote)
-        if answer_body and is_near_quote_duplicate(answer_body, quote):
-            answer_body = normalize_short_answer(answer_body, quote=quote)
+            answer_body = enforce_short_paraphrase(
+                chunk_text, query=query or "", quote=quote
+            )
 
         answer = format_human_answer(
             answer=answer_body,
             document_title=title,
-            locator=str(locator) if locator else None,
+            locator=locator,
             quote=quote,
+            query=query or "",
             glossary=self._glossary,
         )
-        return GroundingResult(ok=True, citations=citations, answer_text=answer)
+        if not answer:
+            # Extraction failed — caller should regenerate a short paraphrase.
+            return GroundingResult(
+                ok=False,
+                citations=citations,
+                answer_text=None,
+                needs_repair=True,
+                reason="paraphrase_required",
+            )
+        final_body = extract_answer_body(answer) or ""
+        return GroundingResult(
+            ok=True,
+            citations=citations,
+            answer_text=answer,
+            needs_repair=needs_paraphrase_repair(final_body, quote=quote),
+        )

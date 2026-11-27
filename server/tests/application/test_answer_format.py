@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.application.test_answer_format
-PURPOSE: Human-readable Ответ/Источник/Цитата — short, no clause dump, abbr expand.
+PURPOSE: Human-readable Ответ/Источник/Цитата — short paraphrase, abbr expand.
 Dependencies: dialogue.answer_format; GroundingService; glossary
 """
 
@@ -9,10 +9,10 @@ from __future__ import annotations
 from app.application.dialogue.answer_format import (
     build_answer_system_prompt,
     build_answer_user_prompt,
+    enforce_short_paraphrase,
     extract_answer_body,
     format_human_answer,
-    is_near_quote_duplicate,
-    normalize_short_answer,
+    looks_like_regulation_copy,
     strip_regulation_noise,
     summary_from_answer,
 )
@@ -23,8 +23,8 @@ from app.domain.glossary import AbbreviationGlossary
 def test_system_prompt_forbids_clause_dump_and_quote_copy() -> None:
     prompt = build_answer_system_prompt("- корпоративные регламенты и процессы: тест")
     assert "Ответ:" in prompt
-    assert "номеров пунктов" in prompt or "9.5" in prompt
-    assert "не копируй" in prompt.lower() or "НЕ копия" in prompt
+    assert "Юридические лица Компании" in prompt
+    assert "заключаются от" in prompt  # negative example
     assert "РП (Руководитель проекта)" in prompt
     assert "УЖЕ выполнен" in prompt
     assert "UNSUPPORTED" in prompt
@@ -37,7 +37,7 @@ def test_user_prompt_lists_passages() -> None:
     )
     assert "В какой срок назначается РП?" in user
     assert "[0] (2.7.)" in user
-    assert "без номеров пунктов" in user
+    assert "парафраз" in user.lower() or "НЕ копия" in user
 
 
 def test_strip_regulation_noise_removes_clause_numbers() -> None:
@@ -53,14 +53,15 @@ def test_strip_regulation_noise_removes_clause_numbers() -> None:
     assert "юридических лиц Компании" in cleaned
 
 
-def test_normalize_rejects_full_quote_as_answer() -> None:
+def test_enforce_rejects_full_quote_as_answer() -> None:
     quote = (
         "Если предоставлена полная информация, Координатор департамента назначает РП "
         "в соответствии с итоговым Расчётом проекта в течение 1 рабочего дня."
     )
-    assert is_near_quote_duplicate(quote, quote)
-    short = normalize_short_answer(quote, quote=quote)
+    assert looks_like_regulation_copy(quote, quote)
+    short = enforce_short_paraphrase(quote, query="В какой срок назначается РП?", quote=quote)
     assert short != quote
+    assert "назначает РП в соответствии" not in short
     assert len(short) < len(quote)
 
 
@@ -87,6 +88,7 @@ def test_format_human_answer_three_lines_and_expands_abbr() -> None:
             "назначает РП в соответствии с итоговым Расчётом проекта "
             "в течение 1 рабочего дня."
         ),
+        query="В какой срок назначается РП?",
         glossary=glossary,
     )
     lines = text.splitlines()
@@ -95,7 +97,8 @@ def test_format_human_answer_three_lines_and_expands_abbr() -> None:
     assert "**" not in lines[0]
     assert "п. 2.7" not in lines[0]
     assert lines[1].startswith("Источник:")
-    assert "п. 2.7" in lines[1]
+    assert lines[1].endswith("п. 2.7.")
+    assert "назначает РП в соответствии" not in lines[1]
     assert lines[2].startswith("Цитата:")
 
 
@@ -146,10 +149,9 @@ def test_ground_short_answer_not_clause_dump() -> None:
     first = answer.splitlines()[0]
     assert "**9.5" not in first
     assert "Согласно регламенту" not in first
-    assert "юридических лиц Компании" in first
+    assert "юридических лиц компании" in first.lower()
     assert "Источник:" in answer and "п. 9.5" in answer
     assert "Цитата:" in answer
-    # Ответ must not equal the full quote body.
     quote_line = [ln for ln in answer.splitlines() if ln.startswith("Цитата:")][0]
     assert first.removeprefix("Ответ:").strip() not in (
         quote_line.removeprefix("Цитата:").strip().strip("«»")
@@ -210,3 +212,4 @@ def test_ground_without_draft_still_strips_clause_marker() -> None:
     assert first.startswith("Ответ:")
     assert "**9.5" not in first
     assert "Согласно регламенту" not in first
+    assert "подписывают" not in first.lower()

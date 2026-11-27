@@ -22,6 +22,9 @@ from app.adapters.llm.port import LLMClient
 from app.application.dialogue.answer_format import (
     build_answer_system_prompt,
     build_answer_user_prompt,
+    build_paraphrase_repair_prompt,
+    extract_answer_body,
+    needs_paraphrase_repair,
 )
 from app.application.dialogue.offtopic import (
     OFF_TOPIC_REFUSAL_RU,
@@ -222,10 +225,44 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         result = deps.grounding.ground(
             candidates=candidates, draft=draft, query=user_message
         )
+        # If Ответ is still a regulation dump / mid-clause cut, regenerate a short paraphrase.
+        quote = str((result.citations or [{}])[0].get("quote") or "")
+        if not quote and candidates:
+            quote = str(candidates[0].get("text") or "")
+        final_body = extract_answer_body(result.answer_text or "") or ""
+        if candidates and (
+            not result.ok
+            or not result.answer_text
+            or result.needs_repair
+            or needs_paraphrase_repair(final_body, quote=quote)
+        ):
+            bad = final_body or extract_answer_body(draft or "") or (draft or "")[:240]
+            t1 = time.perf_counter()
+            repaired = await deps.llm.complete(
+                system=build_answer_system_prompt(
+                    format_topics_for_prompt(list(deps.allowed_topics))
+                ),
+                user=build_paraphrase_repair_prompt(
+                    question=user_message,
+                    quote=quote,
+                    bad_answer=bad or "regulation dump",
+                ),
+            )
+            complete_ms = round(complete_ms + (time.perf_counter() - t1) * 1000, 2)
+            repaired = strip_think_blocks(repaired or "") or None
+            if repaired and "UNSUPPORTED" not in (repaired or "").upper():
+                repaired_result = deps.grounding.ground(
+                    candidates=candidates, draft=repaired, query=user_message
+                )
+                if repaired_result.ok and repaired_result.answer_text:
+                    result = repaired_result
+                elif not result.ok and repaired_result.citations:
+                    # Keep citations for escalation context when first pass had none usable.
+                    result = repaired_result
         latency = _merge_latency(state, llm_complete_ms=complete_ms) if candidates else dict(
             state.get("latency_ms") or {}
         )
-        if result.ok:
+        if result.ok and result.answer_text:
             return {
                 **state,
                 "grounded": True,
@@ -239,7 +276,7 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             **state,
             "grounded": False,
             "draft_answer": "",
-            "citations": [],
+            "citations": list(result.citations or []),
             "outcome": "escalate",
             "escalation_reason": result.reason or "ungrounded",
             "latency_ms": latency,
