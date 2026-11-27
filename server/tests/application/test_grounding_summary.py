@@ -64,6 +64,38 @@ def test_ground_uses_draft_when_overlapping_chunk() -> None:
     assert not (result.answer_text or "").endswith("Аккаунт-менедже")  # complete
 
 
+def test_ground_answer_stops_before_next_numbered_clause() -> None:
+    """Chunk bleed ``…Компании. **10.`` must not appear in answer/summary text."""
+    svc = GroundingService(min_citations=1, min_score=0.0)
+    chunk = (
+        "**9.5.** Договоры на закупку подписывают уполномоченные представители "
+        "юридических лиц Компании. **10."
+    )
+    candidates = [
+        {
+            "document_id": "d1",
+            "chunk_id": "c95",
+            "text": chunk,
+            "score": 0.95,
+            "document_title": "Регламент закупок",
+            "locator": "9.5.",
+        }
+    ]
+    result = svc.ground(
+        candidates=candidates,
+        draft=None,
+        query="Кто подписывает договоры на закупку?",
+    )
+    assert result.ok
+    answer = result.answer_text or ""
+    assert "юридических лиц Компании." in answer
+    assert "**10" not in answer
+    assert not answer.rstrip().endswith("**10.")
+    assert result.citations[0]["locator"] == "9.5."
+    quote = result.citations[0]["quote"] or ""
+    assert "**10" not in quote
+
+
 def test_ground_strips_think_from_draft_before_answer() -> None:
     """First-generate path: CoT in draft must not leak into answer_text."""
     svc = GroundingService()
