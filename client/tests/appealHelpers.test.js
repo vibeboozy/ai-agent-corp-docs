@@ -6,6 +6,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   APPEALS_LIST_LIMIT,
+  areChatMessagesRenderEqual,
   attachEscalationEmailDrafts,
   buildEscalationEmailDraft,
   canSendInAppeal,
@@ -235,5 +236,49 @@ describe('mergeLocalEscalationState', () => {
     const merged = mergeLocalEscalationState(server, []);
     assert.ok(merged[1].email_draft);
     assert.equal(merged[1].ticketCreated, false);
+  });
+});
+
+describe('areChatMessagesRenderEqual', () => {
+  const base = [
+    { id: 'u1', role: 'user', content: 'Q' },
+    {
+      id: 'a1',
+      role: 'assistant',
+      content: 'Escalate',
+      status: 'escalate',
+      email_draft: { to: 'quality@company.ru', subject: 'S', body: 'B' },
+      ticketCreated: false,
+      citations: [{ doc_name: 'Doc', section: '1', quote: 'q' }]
+    }
+  ];
+
+  it('treats structurally identical lists as equal', () => {
+    const copy = JSON.parse(JSON.stringify(base));
+    assert.equal(areChatMessagesRenderEqual(base, copy), true);
+  });
+
+  it('detects id / draft / citation differences', () => {
+    assert.equal(
+      areChatMessagesRenderEqual(base, [
+        base[0],
+        { ...base[1], id: 'a2' }
+      ]),
+      false
+    );
+    assert.equal(
+      areChatMessagesRenderEqual(base, [
+        base[0],
+        { ...base[1], email_draft: { ...base[1].email_draft, body: 'edited' } }
+      ]),
+      false
+    );
+    assert.equal(
+      areChatMessagesRenderEqual(base, [
+        base[0],
+        { ...base[1], citations: [] }
+      ]),
+      false
+    );
   });
 });

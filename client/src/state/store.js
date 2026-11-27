@@ -1,5 +1,9 @@
 import { CONFIG } from '../config.js';
-import { createLocalSessionId, isServerAppealId } from '../utils/appealHelpers.js';
+import {
+  areChatMessagesRenderEqual,
+  createLocalSessionId,
+  isServerAppealId
+} from '../utils/appealHelpers.js';
 
 /**
  * Генерация локального id сессии (НЕ UUID серверного appeal).
@@ -206,6 +210,106 @@ class Store {
     if (sessionId === this.state.sessionId) {
       partial.chatMessages = newMessages;
     }
+    this.setState(partial);
+  }
+
+  /**
+   * Apply a server history reload for one appeal in a single setState.
+   * Avoids the open-path flicker from sequential saveSessionMessages →
+   * setChatLoading → setAppealStatus (each remounted the whole feed).
+   * Skips replacing active chatMessages when the feed would look the same.
+   *
+   * @param {string} sessionId
+   * @param {{ messages?: Array, appealStatus?: string|null, chatLoading?: boolean }} payload
+   */
+  applyAppealHistoryReload(sessionId, payload = {}) {
+    if (!sessionId) return;
+    const { messages, appealStatus, chatLoading } = payload;
+    const isActive = this.state.sessionId === sessionId;
+    const hasMessages = Array.isArray(messages);
+    const nextStatus =
+      appealStatus !== undefined && appealStatus !== null
+        ? appealStatus
+        : isActive
+          ? this.state.appealStatus
+          : null;
+
+    let sessions = this.state.sessions;
+    let sessionsChanged = false;
+
+    if (hasMessages) {
+      sessions = [...this.state.sessions];
+      const index = sessions.findIndex((s) => s.session_id === sessionId);
+      const firstUserMsg = messages.find((m) => m.role === 'user');
+      const autoTitle = firstUserMsg ? firstUserMsg.content.slice(0, 45) : 'Новый диалог';
+      const statusForSession =
+        appealStatus !== undefined && appealStatus !== null
+          ? appealStatus
+          : index >= 0
+            ? sessions[index].appeal_status
+            : null;
+
+      if (index >= 0) {
+        sessions[index] = {
+          ...sessions[index],
+          title:
+            sessions[index].title && sessions[index].title !== 'Новый диалог'
+              ? sessions[index].title
+              : autoTitle,
+          updated_at: new Date().toISOString(),
+          messages,
+          appeal_status: statusForSession
+        };
+      } else {
+        sessions.unshift({
+          session_id: sessionId,
+          title: autoTitle,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          messages,
+          appeal_status: statusForSession
+        });
+      }
+      sessionsChanged = true;
+    } else if (appealStatus !== undefined && appealStatus !== null) {
+      sessions = this.state.sessions.map((s) => {
+        if (s.session_id !== sessionId) return s;
+        if (s.appeal_status === appealStatus) return s;
+        sessionsChanged = true;
+        return { ...s, appeal_status: appealStatus };
+      });
+    }
+
+    const partial = {};
+    if (sessionsChanged) {
+      partial.sessions = sessions;
+    }
+
+    if (isActive && hasMessages) {
+      const sameFeed = areChatMessagesRenderEqual(this.state.chatMessages, messages);
+      if (!sameFeed) {
+        partial.chatMessages = messages;
+      }
+    }
+
+    if (
+      isActive &&
+      appealStatus !== undefined &&
+      appealStatus !== null &&
+      appealStatus !== this.state.appealStatus
+    ) {
+      partial.appealStatus = appealStatus;
+    }
+
+    if (chatLoading !== undefined && chatLoading !== this.state.chatLoading) {
+      // Only touch loading for the active appeal; background reloads must not
+      // clear/set the spinner of a different open chat.
+      if (isActive) {
+        partial.chatLoading = chatLoading;
+      }
+    }
+
+    if (Object.keys(partial).length === 0) return;
     this.setState(partial);
   }
 

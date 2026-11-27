@@ -16,6 +16,8 @@ export class ChatTab {
     this.container = container;
     this.unsubscribe = null;
     this.renderedMessagesCount = 0;
+    /** @type {string|null} last feed render fingerprint — skip identical remounts */
+    this._lastFeedFingerprint = null;
     /** @type {Set<string>} message ids with in-flight ticket submit */
     this._ticketSubmitInFlight = new Set();
   }
@@ -385,21 +387,28 @@ export class ChatTab {
                 apiClient.getAppealMessages(sid),
                 apiClient.getAppeal(sid).catch(() => null)
               ]);
+              // User may have switched away while the request was in flight.
+              if (store.getState().sessionId !== sid) return;
+
               const stillPending = store.isSessionPending(sid);
               if (res && res.items && res.items.length > 0) {
                 const merged = mergeLocalEscalationState(res.items, localMessages);
-                // Persist into sessions[] so leave/return keeps the preview form.
-                store.saveSessionMessages(sid, merged);
-                store.setState({ chatLoading: stillPending });
-              } else if (stillPending) {
-                store.setState({ chatLoading: true });
-              }
-              if (appeal && appeal.status) {
-                store.setAppealStatus(appeal.status);
+                // One setState for messages + status + loader — avoids feed flicker
+                // from sequential saveSessionMessages → setChatLoading → setAppealStatus.
+                store.applyAppealHistoryReload(sid, {
+                  messages: merged,
+                  appealStatus: appeal?.status || null,
+                  chatLoading: stillPending
+                });
+              } else {
+                store.applyAppealHistoryReload(sid, {
+                  appealStatus: appeal?.status || null,
+                  chatLoading: stillPending
+                });
               }
             } catch (err) {
               console.warn('Не удалось загрузить историю с сервера, используется локальный кэш:', err);
-              if (store.isSessionPending(sid)) {
+              if (store.getState().sessionId === sid && store.isSessionPending(sid)) {
                 store.setState({ chatLoading: true });
               }
             }
@@ -411,11 +420,39 @@ export class ChatTab {
   }
 
   /**
+   * Stable fingerprint for the chat feed. Identical value ⇒ skip innerHTML remount
+   * (sessionId + appealStatus included: form visibility depends on status, and two
+   * appeals can share identical message text).
+   */
+  buildFeedFingerprint(messages, isLoading, appealStatus, sessionId) {
+    const msgKey = (messages || []).map((m) => ([
+      m.id,
+      m.role,
+      m.content,
+      m.status || '',
+      m.ticketCreated ? 1 : 0,
+      m.ticketId || '',
+      m.email_draft
+        ? `${m.email_draft.to || ''}|${m.email_draft.subject || ''}|${m.email_draft.body || ''}`
+        : '',
+      (m.citations || []).map((c) => `${c.doc_name || ''}|${c.section || ''}|${c.quote || ''}`).join('^')
+    ].join(':')));
+    return `${sessionId || ''}|${appealStatus || ''}|${isLoading ? 1 : 0}|${msgKey.join(';')}`;
+  }
+
+  /**
    * Отрисовка списка сообщений или пустого экрана с демо-чипсами
    */
   renderMessages(messages, isLoading) {
     const feed = this.container.querySelector('#chat-feed');
     if (!feed) return;
+
+    const { appealStatus, sessionId } = store.getState();
+    const fingerprint = this.buildFeedFingerprint(messages, isLoading, appealStatus, sessionId);
+    if (fingerprint === this._lastFeedFingerprint) {
+      return;
+    }
+    this._lastFeedFingerprint = fingerprint;
 
     if (!messages || messages.length === 0) {
       feed.innerHTML = this.renderEmptyStateHtml();
