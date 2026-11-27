@@ -568,14 +568,17 @@ button, input, textarea, select {
 
 .toast-success {
   border-left: 3px solid var(--color-status-answer);
+  background-color: var(--color-status-answer-bg);
 }
 
 .toast-error {
   border-left: 3px solid var(--color-danger);
+  background-color: var(--color-danger-bg);
 }
 
 .toast-info {
-  border-left: 3px solid var(--color-primary);
+  border-left: 3px solid var(--color-info);
+  background-color: var(--color-info-bg);
 }
 
 .toast-icon {
@@ -586,7 +589,7 @@ button, input, textarea, select {
 
 .toast-success .toast-icon { color: var(--color-status-answer); }
 .toast-error .toast-icon { color: var(--color-danger); }
-.toast-info .toast-icon { color: var(--color-primary); }
+.toast-info .toast-icon { color: var(--color-info); }
 
 .toast-message {
   flex: 1;

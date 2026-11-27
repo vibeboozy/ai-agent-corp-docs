@@ -12,7 +12,9 @@ export function showToast(message, type = 'info', duration = 4000) {
 
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
-  toast.setAttribute('role', 'alert');
+  // Errors are assertive; info/success are polite status updates (not alarm-red UX).
+  toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
+  toast.setAttribute('data-toast-type', type);
 
   let iconSvg = '';
   if (type === 'success') {

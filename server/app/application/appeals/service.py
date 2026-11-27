@@ -52,10 +52,16 @@ class AppealsService:
         topic: str | None = None,
         first_message: str | None = None,
     ) -> CreateAppealResult:
+        # Prefer explicit topic; otherwise derive from the first user message so
+        # quality-cabinet list never falls back to AI summary as the "question".
+        resolved_topic = topic
+        if not (resolved_topic and resolved_topic.strip()) and first_message:
+            resolved_topic = first_message.strip()[:120]
+
         appeal = await self._persistence.create_appeal(
             user_id=user_id,
             user_label=user_label,
-            topic=topic,
+            topic=resolved_topic,
             status=AppealStatus.OPEN,
         )
         messages: list[Message] = []

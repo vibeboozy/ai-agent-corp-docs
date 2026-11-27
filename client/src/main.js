@@ -19,10 +19,10 @@ class App {
     this.initSettingsPopover();
     this.subscribeToStore();
 
-    // Загрузка начального списка тикетов для синхронизации бейджа
+    // Единственный стартовый GET /appeals (бейдж + кабинет СК). Без дубля в QualityTab.
     try {
       const tickets = await apiClient.getTickets();
-      store.setState({ tickets });
+      store.setState({ tickets, ticketsLoadedOnce: true });
     } catch (err) {
       console.warn('Не удалось загрузить начальные тикеты:', err);
     }
@@ -37,9 +37,9 @@ class App {
     this.qualityTab = new QualityTab(qualityContainer);
     this.analyticsTab = new AnalyticsTab(analyticsContainer);
 
-    // Монтируем вкладки
+    // Монтируем вкладки (QualityTab не грузит appeals сама — один fetch ниже)
     this.chatTab.mount();
-    this.qualityTab.mount();
+    this.qualityTab.mount({ skipInitialLoad: true });
     this.analyticsTab.mount();
 
     // Обработчики кликов по табам в шапке

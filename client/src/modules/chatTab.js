@@ -2,7 +2,8 @@ import { store } from '../state/store.js';
 import { apiClient } from '../services/apiClient.js';
 import { DEMO_PROMPTS } from '../config.js';
 import { escapeHtml, formatTextWithLineBreaks, formatTimeShort, formatSessionDate, autoResizeTextarea } from '../utils/dom.js';
-import { toastSuccess, toastError, toastInfo } from '../utils/toast.js';
+import { toastSuccess, toastError } from '../utils/toast.js';
+import { canSendInAppeal, isServerAppealId } from '../utils/appealHelpers.js';
 
 export class ChatTab {
   constructor(container) {
@@ -158,7 +159,7 @@ export class ChatTab {
     // Кнопка нового диалога в сайдбаре
     const startNewChatHandler = () => {
       store.startNewChat();
-      toastInfo('Начат новый диалог.');
+      toastSuccess('Начат новый диалог.');
       this.closeMobileSidebar();
       setTimeout(() => textarea.focus(), 50);
     };
@@ -225,17 +226,15 @@ export class ChatTab {
       this.renderSessionsHistory(newState.sessions, newState.sessionId);
     }
 
-    // Блокировка ввода во время загрузки
-    const textarea = this.container.querySelector('#chat-textarea');
-    const sendBtn = this.container.querySelector('#chat-send-btn');
-    if (textarea && sendBtn) {
-      if (newState.chatLoading) {
-        textarea.disabled = true;
-        sendBtn.disabled = true;
-      } else {
-        textarea.disabled = false;
-        sendBtn.disabled = textarea.value.trim().length === 0;
-      }
+    // Блокировка ввода во время загрузки / закрытого обращения
+    this.syncComposerState(newState);
+
+    // Баннер статуса обращения (answered — можно продолжать; closed — новый диалог)
+    if (
+      newState.appealStatus !== prevState.appealStatus ||
+      newState.sessionId !== prevState.sessionId
+    ) {
+      this.renderAppealStatusBanner(newState.appealStatus);
     }
 
     // Если изменился список сообщений или состояние загрузки - обновляем ленту
@@ -247,6 +246,69 @@ export class ChatTab {
     }
   }
 
+  syncComposerState(state) {
+    const textarea = this.container.querySelector('#chat-textarea');
+    const sendBtn = this.container.querySelector('#chat-send-btn');
+    if (!textarea || !sendBtn) return;
+
+    const closed = !canSendInAppeal(state.appealStatus);
+    if (state.chatLoading || closed) {
+      textarea.disabled = true;
+      sendBtn.disabled = true;
+      if (closed) {
+        textarea.placeholder = 'Обращение закрыто — начните новый диалог';
+      }
+    } else {
+      textarea.disabled = false;
+      textarea.placeholder = 'Задайте вопрос по регламентам...';
+      sendBtn.disabled = textarea.value.trim().length === 0;
+    }
+  }
+
+  renderAppealStatusBanner(appealStatus) {
+    const header = this.container.querySelector('.chat-header');
+    if (!header) return;
+
+    let banner = this.container.querySelector('#chat-appeal-banner');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'chat-appeal-banner';
+      banner.className = 'chat-appeal-banner';
+      header.insertAdjacentElement('afterend', banner);
+    }
+
+    if (appealStatus === 'closed') {
+      banner.className = 'chat-appeal-banner chat-appeal-banner-closed';
+      banner.innerHTML = `
+        <span>Это обращение закрыто. Чтобы задать новый вопрос, начните новый диалог.</span>
+        <button type="button" class="btn btn-secondary btn-sm" id="chat-banner-new-btn">Новый диалог</button>
+      `;
+      banner.classList.remove('hidden');
+      const btn = banner.querySelector('#chat-banner-new-btn');
+      if (btn) {
+        btn.addEventListener('click', () => {
+          store.startNewChat();
+          toastSuccess('Начат новый диалог.');
+        });
+      }
+    } else if (appealStatus === 'answered') {
+      banner.className = 'chat-appeal-banner chat-appeal-banner-answered';
+      banner.innerHTML = `
+        <span>Ответ получен. Можно задать уточняющий вопрос в этом же диалоге или начать новый.</span>
+      `;
+      banner.classList.remove('hidden');
+    } else if (appealStatus === 'escalated') {
+      banner.className = 'chat-appeal-banner chat-appeal-banner-escalated';
+      banner.innerHTML = `
+        <span>Вопрос передан в Службу качества. Можно дополнить контекст сообщением или дождаться ответа эксперта.</span>
+      `;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+      banner.innerHTML = '';
+    }
+  }
+
   renderState(state) {
     const sessionBadge = this.container.querySelector('#chat-session-badge');
     if (sessionBadge && state.sessionId) {
@@ -254,6 +316,8 @@ export class ChatTab {
     }
     this.renderSessionsHistory(state.sessions, state.sessionId);
     this.renderMessages(state.chatMessages, state.chatLoading);
+    this.renderAppealStatusBanner(state.appealStatus);
+    this.syncComposerState(state);
   }
 
   /**
@@ -302,13 +366,18 @@ export class ChatTab {
         if (sid && sid !== store.getState().sessionId) {
           store.switchSession(sid);
 
-          // Если в режиме API и это серверный UUID, подтягиваем актуальные сообщения через GET /appeals/{id}/messages
-          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sid);
-          if (store.getState().mode === 'api' && isUuid) {
+          // Если в режиме API и это серверный UUID, подтягиваем актуальные сообщения
+          if (store.getState().mode === 'api' && isServerAppealId(sid)) {
             try {
-              const res = await apiClient.getAppealMessages(sid);
+              const [res, appeal] = await Promise.all([
+                apiClient.getAppealMessages(sid),
+                apiClient.getAppeal(sid).catch(() => null)
+              ]);
               if (res && res.items && res.items.length > 0) {
                 store.setState({ chatMessages: res.items });
+              }
+              if (appeal && appeal.status) {
+                store.setAppealStatus(appeal.status);
               }
             } catch (err) {
               console.warn('Не удалось загрузить историю с сервера, используется локальный кэш:', err);
@@ -642,6 +711,12 @@ export class ChatTab {
 
   async handleUserSendMessage(question) {
     const state = store.getState();
+
+    if (!canSendInAppeal(state.appealStatus)) {
+      toastError('Обращение закрыто. Начните новый диалог.');
+      return;
+    }
+
     const userMsg = {
       id: Date.now(),
       role: 'user',
@@ -665,7 +740,7 @@ export class ChatTab {
     try {
       const response = await apiClient.sendChatMessage({
         question,
-        session_id: state.sessionId,
+        session_id: store.getState().sessionId,
         history: historyPayload
       });
 
@@ -681,13 +756,17 @@ export class ChatTab {
         timestamp: new Date().toISOString()
       };
 
+      // sessionId may already be remapped to the server appeal UUID by apiClient
       store.saveActiveSessionMessages([...newMessages, assistantMsg]);
-      store.setState({
-        chatLoading: false
-      });
+      store.setState({ chatLoading: false });
     } catch (err) {
       store.setState({ chatLoading: false });
-      toastError(err.message || 'Не удалось получить ответ от ассистента');
+      if (err.status === 409 || err.code === 'CONFLICT_STATUS') {
+        store.setAppealStatus('closed');
+        toastError('Обращение закрыто. Начните новый диалог.');
+      } else {
+        toastError(err.message || 'Не удалось получить ответ от ассистента');
+      }
     }
   }
 

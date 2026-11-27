@@ -161,6 +161,40 @@
   font-family: var(--font-mono);
 }
 
+/* Баннер статуса обращения (answered → continue; closed → new chat) */
+.chat-appeal-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  font-size: var(--font-size-sm);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.chat-appeal-banner.hidden {
+  display: none;
+}
+
+.chat-appeal-banner-answered {
+  background-color: var(--color-status-answer-bg);
+  color: var(--color-status-answer);
+  border-bottom-color: var(--color-status-answer-border);
+}
+
+.chat-appeal-banner-escalated {
+  background-color: var(--color-status-escalate-bg);
+  color: var(--color-status-escalate);
+  border-bottom-color: var(--color-status-escalate-border);
+}
+
+.chat-appeal-banner-closed {
+  background-color: var(--color-danger-bg);
+  color: var(--color-danger);
+  border-bottom-color: var(--color-danger-border);
+}
+
 /* Лента сообщений */
 .chat-feed {
   flex: 1;
