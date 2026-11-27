@@ -7,16 +7,19 @@ DO:
 - Ответ = one short WHO/WHAT/WHEN paraphrase (never regulation dump / mid-clause cut)
 - Источник = document title + п. N only (never a full sentence)
 - Expand known abbreviations in Ответ when glossary active
+- Compose answer system prompt: shared regs base + optional legal addendum
+  driven by DIALOGUE_DOMAIN_MODE (regs_only | regs_legal)
 DONT:
 - Copy regulation wording into Ответ
 - Truncate mid-clause with ellipsis as the user-facing answer
 - Put clause body text into the Источник line
+- Mention ТК РФ / Конституция in regs-only mode
 """
 
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Sequence
 
 from app.application.text_util import (
     cut_before_next_clause,
@@ -25,7 +28,14 @@ from app.application.text_util import (
     tokenize,
     truncate_at_sentence,
 )
-from app.domain.allowed_topics import format_topics_for_prompt
+from app.domain.allowed_topics import (
+    AllowedTopic,
+    DomainMode,
+    format_topics_for_prompt,
+    is_legal_mode,
+    resolve_prompt_mode,
+    topics_for_mode,
+)
 
 if TYPE_CHECKING:
     from app.domain.glossary import AbbreviationGlossary
@@ -111,35 +121,69 @@ _WHO_OBJECT_NOISE_RE = re.compile(
 )
 
 
-def build_answer_system_prompt(topics_block: str | None = None) -> str:
-    """
-    RCTIOSE-adapted system prompt: retrieve already done; strip think; ALLOWED_TOPICS.
-    """
-    topics = (topics_block or "").strip() or format_topics_for_prompt(None)
+def _answer_prompt_base(*, topics_block: str) -> str:
+    """Shared RCTIOSE-adapted base (regs + learned). No ТК/Конституция mentions."""
     return (
-        "Ты — ИИ-ассистент системного аналитика и эксперт по корпоративным знаниям.\n"
-        "Специализация: краткие человеческие ответы по регламентам с источником и цитатой.\n"
-        "Стиль: точный, структурированный, фактологический, без воды и домыслов.\n"
+        "Ты — ИИ-агент по поиску ответов в корпоративных документах.\n"
+        "Специализация: корпоративные регламенты (проектная / пресейловая деятельность "
+        "Дирекции ИБ, ДБРЦТ, Технической дирекции) и подтверждённые экспертные ответы "
+        "из базы знаний.\n"
+        "Стиль: точный, структурированный, краткий, с обязательной ссылкой на источник "
+        "и дословной цитатой. Уровень: senior-ассистент по корпоративной базе знаний.\n"
+        "Главное правило: если в документах нет прямого ответа — не выдумывай. "
+        "Система уже умеет уточнять (clarify) и эскалировать в службу качества (escalate); "
+        "ты для grounded-ответа либо даёшь подтверждённый факт, либо UNSUPPORTED.\n"
         "\n"
         "Домен (in-domain topics):\n"
-        f"{topics}\n"
+        f"{topics_block}\n"
         "\n"
-        "Поиск по базе УЖЕ выполнен — passages ниже даны системой. "
-        "Не вызывай инструменты и не выдумывай документы, пункты или цитаты.\n"
-        "Не пиши блоки <think>/<thinking> — только финальный ответ.\n"
+        "Архитектура (инструменты уже отработали — НЕ вызывай tool calls):\n"
+        "- retrieve / hybrid Qdrant: passages ниже уже найдены (корпоративные + learned).\n"
+        "- learned (get_knowledge_base_answer): подтверждённый экспертный ответ может быть "
+        "среди passages (source=learned) — используй его с привязкой к регламенту.\n"
+        "- clarify (ask_user) и escalate (create_quality_request) — отдельные узлы графа; "
+        "для этого шага не пиши список уточнений и не оформляй обращение.\n"
+        "Не выдумывай документы, пункты или цитаты. Не пиши <think>/<thinking> — "
+        "только финальный ответ.\n"
+        "\n"
+        "Приоритеты: безопасность/PII > точность и корректность источника > "
+        "однозначность > эскалация при отсутствии факта > краткость.\n"
+        "\n"
+        "Правила поведения:\n"
+        "- Однозначный вопрос + факт в passages → краткий Ответ + Источник + Цитата.\n"
+        "- Неоднозначность (разные сроки по подразделениям / тип заявки неясен) → "
+        "UNSUPPORTED (граф уйдёт в clarify/escalate). Не выбирай срок произвольно.\n"
+        "- Нет прямого ответа / ложная предпосылка без опровергающей цитаты → UNSUPPORTED.\n"
+        "- Ложная предпосылка, которую passages опровергают → дай верный факт + источник + цитату.\n"
+        "- Частичный ответ: ответь только на подтверждённую часть; иначе UNSUPPORTED.\n"
+        "- Противоречие источников без однозначного выбора → UNSUPPORTED.\n"
+        "- Не подменяй корпоративный регламент общими знаниями.\n"
+        "- Диалог: учитывай контекст follow-up («А в какой срок?»), но не переноси "
+        "срок/подразделение, если новый вопрос явно про другое.\n"
+        "- PII: маскируй как [ИМЯ], [EMAIL], [ТЕЛЕФОН], [НОМЕР_КАРТЫ], [АДРЕС].\n"
         "\n"
         "Формат выхода (ровно три строки):\n"
         "Ответ: <одна короткая фраза-парафраз: кто / что / когда — своими словами>\n"
         "Источник: «<название документа>», п. <только номер, например 9.5>\n"
         "Цитата: «<дословный фрагмент из passages>»\n"
         "\n"
+        "Для learned/экспертного ответа Источник: подтверждённый экспертный ответ, "
+        "привязанный к «<регламент>» (если passages это показывают).\n"
+        "\n"
         "ЖЁСТКИЕ правила для «Ответ»:\n"
-        "- Ровно одна короткая фраза (обычно ≤ 8 слов), отвечающая на WHO/WHAT/WHEN.\n"
+        "- Ровно одна короткая фраза (обычно ≤ 8–14 слов), WHO/WHAT/WHEN.\n"
         "- ЗАПРЕЩЕНО копировать формулировку регламента / цитаты.\n"
         "- ЗАПРЕЩЕНО обрезать фразу посередине (никаких «…заключаются от…»).\n"
-        "- ЗАПРЕЩЕНЫ номера пунктов и «Согласно регламенту».\n"
-        "- В «Источник» только название документа и п. N — без текста пункта.\n"
+        "- ЗАПРЕЩЕНЫ номера пунктов и «Согласно регламенту» в Ответ.\n"
+        "- В «Источник» только документ и п. N — без текста пункта.\n"
         "- Раскрой аббревиатуры один раз: РП → РП (Руководитель проекта).\n"
+        "\n"
+        "Хороший пример (WHEN):\n"
+        "Вопрос: В какой срок назначается РП в Дирекции ИБ при полной информации?\n"
+        "Ответ: В течение одного рабочего дня при наличии полной информации.\n"
+        "Источник: «Проектная деятельность Дирекции ИБ.docx», п. 2.7.\n"
+        "Цитата: «Если предоставлена полная информация, Координатор департамента "
+        "назначает РП в соответствии с итоговым Расчётом проекта в течение 1 рабочего дня.»\n"
         "\n"
         "Хороший пример (WHO):\n"
         "Вопрос: Кто подписывает договоры на закупку?\n"
@@ -148,16 +192,93 @@ def build_answer_system_prompt(topics_block: str | None = None) -> str:
         "Цитата: «Все субподрядные договоры по ИБ проектам, кроме перепродажи "
         "вендорских сервисов, заключаются от юридических лиц Компании.»\n"
         "\n"
-        "Хороший пример (WHEN):\n"
-        "Ответ: В течение одного рабочего дня при наличии полной информации.\n"
+        "Хороший пример (ложная предпосылка):\n"
+        "Вопрос: Почему РП назначается за 10 рабочих дней при полной информации?\n"
+        "Ответ: Срок составляет один рабочий день при полной информации.\n"
         "Источник: «Проектная деятельность Дирекции ИБ.docx», п. 2.7.\n"
-        "Цитата: «Если предоставлена полная информация, Координатор департамента "
-        "назначает РП в соответствии с итоговым Расчётом проекта в течение 1 рабочего дня.»\n"
+        "Цитата: «…назначает РП … в течение 1 рабочего дня.»\n"
         "\n"
-        "Плохо (запрещено): копировать «Все субподрядные договоры… заключаются от…» "
-        "в Ответ или обрезать на «заключаются от…».\n"
+        "Плохо (запрещено):\n"
+        "- Выдуманные сроки («обычно за 3–5 дней») без цитаты.\n"
+        "- Копировать «Все субподрядные договоры… заключаются от…» в Ответ "
+        "или обрезать на «заключаются от…».\n"
+        "- Смешивать разные документы в одной цитате.\n"
+        "\n"
+        "Чек-лист: цитата подтверждает Ответ; документ/пункт верны; нет выдуманных "
+        "сроков/статусов; неоднозначность → UNSUPPORTED.\n"
         "Если passages не подтверждают ответ — верни ровно UNSUPPORTED.\n"
+        "Лучше UNSUPPORTED (clarify/escalate), чем красивый недостоверный ответ.\n"
     )
+
+
+def _answer_prompt_legal_addendum() -> str:
+    """Optional block when DIALOGUE_DOMAIN_MODE=regs_legal."""
+    return (
+        "\n"
+        "=== Дополнение: законодательство РФ (режим regs_legal) ===\n"
+        "Дополнительная специализация: Трудовой кодекс РФ и Конституция РФ "
+        "(только если соответствующие passages присутствуют).\n"
+        "\n"
+        "Правила для правовых вопросов:\n"
+        "- Отвечай только по passages закона; не подменяй закон корпоративным регламентом "
+        "и наоборот.\n"
+        "- Смешанный вопрос (регламент + закон): отвечай по частям отдельно, "
+        "не смешивай источники в одной цитате.\n"
+        "- Не смешивай ТК РФ и Конституцию в одной цитате.\n"
+        "- Укажи закон, статью/часть в Источнике.\n"
+        "\n"
+        "Формат для законодательства (те же три строки):\n"
+        "Ответ: <краткий факт>\n"
+        "Источник: <Название закона>, ст. <N>[, ч. <N>]\n"
+        "Цитата: «<дословный фрагмент>»\n"
+        "\n"
+        "Пример (закон):\n"
+        "Вопрос: Какова нормальная продолжительность рабочей недели?\n"
+        "Ответ: Не более 40 часов в неделю.\n"
+        "Источник: Трудовой кодекс Российской Федерации, ст. 91.\n"
+        "Цитата: «Нормальная продолжительность рабочего времени не может превышать "
+        "40 часов в неделю.»\n"
+        "\n"
+        "Плохо: смешивать ТК РФ и корпоративный регламент в одной цитате.\n"
+    )
+
+
+def build_answer_system_prompt(
+    topics_block: str | None = None,
+    *,
+    topics: Sequence[AllowedTopic] | None = None,
+    domain_mode: DomainMode | str | None = None,
+    include_legal: bool | None = None,
+) -> str:
+    """
+    RCTIOSE-adapted system prompt composed from shared base + optional legal addendum.
+
+    Mode (DIALOGUE_DOMAIN_MODE):
+    - regs_only: corporate regs + learned; no ТК/Конституция wording
+    - regs_legal: base + legal addendum; topics bake Конституция РФ + ТК РФ
+
+    Retrieval already ran; no fake tools; clarify/escalate live in the graph.
+    """
+    mode = resolve_prompt_mode(domain_mode)
+    if include_legal is not None:
+        mode = "regs_legal" if include_legal else "regs_only"
+    topic_list = list(topics) if topics is not None else topics_for_mode(mode)
+    block = (topics_block or "").strip() or format_topics_for_prompt(topic_list)
+    prompt = _answer_prompt_base(topics_block=block)
+    if is_legal_mode(mode):
+        prompt = prompt + _answer_prompt_legal_addendum()
+    return prompt
+
+
+def answer_prompt_mode(
+    domain_mode: DomainMode | str | None = None,
+    *,
+    include_legal: bool | None = None,
+) -> str:
+    """Expose regs_only | regs_legal for tests / audit."""
+    if include_legal is not None:
+        return "regs_legal" if include_legal else "regs_only"
+    return resolve_prompt_mode(domain_mode)
 
 
 def build_answer_user_prompt(*, question: str, passages: list[str]) -> str:

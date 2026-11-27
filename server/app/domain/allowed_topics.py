@@ -1,12 +1,14 @@
 """
 ANCHOR: app.domain.allowed_topics
-PURPOSE: Configurable in-domain topic labels for the off-topic / domain gate.
-Dependencies: stdlib only; Settings ALLOWED_TOPICS
+PURPOSE: In-domain topic labels + domain mode for gate / classify / answer prompts.
+Dependencies: stdlib only; Settings DIALOGUE_DOMAIN_MODE
 DO:
 - Always include corporate regulations as the core in-domain topic
-- Parse extra labels/descriptions from env for future corpora (e.g. Конституция РФ)
+- Resolve regs_only vs regs_legal from explicit DIALOGUE_DOMAIN_MODE
+- Bake Конституция РФ + Трудовой кодекс РФ topics when mode is regs_legal
 DONT:
-- Treat weather/chitchat as in-domain just because ALLOWED_TOPICS is set
+- Parse free-form ALLOWED_TOPICS lists (removed)
+- Treat weather/chitchat as in-domain just because legal mode is on
 """
 
 from __future__ import annotations
@@ -14,6 +16,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -31,7 +34,9 @@ class AllowedTopic:
         return f"- {label}"
 
 
-# Always in-domain; ALLOWED_TOPICS only *adds* further corpora after ingest.
+DomainMode = Literal["regs_only", "regs_legal"]
+
+# Always in-domain.
 CORE_ALLOWED_TOPIC = AllowedTopic(
     label="корпоративные регламенты и процессы",
     description=(
@@ -40,56 +45,56 @@ CORE_ALLOWED_TOPIC = AllowedTopic(
     ),
 )
 
+# Baked extras for DIALOGUE_DOMAIN_MODE=regs_legal (ingest matching docs first).
+LEGAL_BAKED_TOPICS: tuple[AllowedTopic, ...] = (
+    AllowedTopic(
+        label="Конституция РФ",
+        description="основной закон РФ",
+    ),
+    AllowedTopic(
+        label="Трудовой кодекс РФ",
+        description="трудовые отношения",
+    ),
+)
+
+_VALID_MODES: frozenset[str] = frozenset({"regs_only", "regs_legal"})
+
 
 def _normalize(text: str) -> str:
     folded = unicodedata.normalize("NFKC", text or "")
     return folded.replace("ё", "е").replace("Ё", "Е").strip()
 
 
-def parse_allowed_topics(raw: str | None) -> list[AllowedTopic]:
+def normalize_domain_mode(raw: str | None) -> DomainMode:
     """
-    Parse ALLOWED_TOPICS env text into topic entries.
+    Map env / caller text to regs_only | regs_legal.
 
-    Separators: `;` `|` or newlines.
-    Each entry: `Label` or `Label=description` or `Label: description`.
+    Unknown / empty values default to regs_only.
     """
-    if not raw or not str(raw).strip():
-        return []
-    text = str(raw).replace("\r\n", "\n").replace("|", ";").replace("\n", ";")
-    out: list[AllowedTopic] = []
-    seen: set[str] = set()
-    for part in text.split(";"):
-        chunk = part.strip()
-        if not chunk:
-            continue
-        label = chunk
-        description = ""
-        if "=" in chunk:
-            label, description = chunk.split("=", 1)
-        elif ":" in chunk:
-            label, description = chunk.split(":", 1)
-        label = label.strip()
-        description = description.strip()
-        if not label:
-            continue
-        key = _normalize(label).lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(AllowedTopic(label=label, description=description))
+    token = (raw or "").strip().lower().replace("-", "_")
+    if token in ("regs_legal", "regs+legal", "legal"):
+        return "regs_legal"
+    return "regs_only"
+
+
+def resolve_prompt_mode(mode: DomainMode | str | None = None) -> DomainMode:
+    """Normalize explicit domain mode (not topic sniffing)."""
+    if mode in _VALID_MODES:
+        return mode  # type: ignore[return-value]
+    return normalize_domain_mode(None if mode is None else str(mode))
+
+
+def topics_for_mode(mode: DomainMode | str | None = None) -> list[AllowedTopic]:
+    """Core corporate topic; + baked Конституция/ТК when regs_legal."""
+    resolved = resolve_prompt_mode(mode)
+    out = [CORE_ALLOWED_TOPIC]
+    if resolved == "regs_legal":
+        out.extend(LEGAL_BAKED_TOPICS)
     return out
 
 
-def resolve_allowed_topics(raw: str | None = None) -> list[AllowedTopic]:
-    """Core corporate topic plus any extras from ALLOWED_TOPICS."""
-    extras = parse_allowed_topics(raw)
-    core_key = _normalize(CORE_ALLOWED_TOPIC.label).lower()
-    merged = [CORE_ALLOWED_TOPIC]
-    for topic in extras:
-        if _normalize(topic.label).lower() == core_key:
-            continue
-        merged.append(topic)
-    return merged
+def is_legal_mode(mode: DomainMode | str | None) -> bool:
+    return resolve_prompt_mode(mode) == "regs_legal"
 
 
 def format_topics_for_prompt(topics: list[AllowedTopic] | None) -> str:
@@ -128,10 +133,10 @@ def mentions_allowed_topic(
     user_message: str, topics: list[AllowedTopic] | None = None
 ) -> bool:
     """
-    True when the message names an *extra* configured topic label.
+    True when the message names an *extra* in-domain topic label.
 
     Core corporate domain is covered by regulation-cue heuristics elsewhere;
-    this only matches ALLOWED_TOPICS extras (and any non-core entries passed in).
+    this only matches baked legal extras (and any non-core entries passed in).
     """
     msg = _normalize(user_message).lower()
     if not msg:
@@ -152,3 +157,12 @@ def mentions_allowed_topic(
             if len(tok) >= 5 and tok in msg:
                 return True
     return False
+
+
+# Alias kept for answer_format / tests naming.
+PromptMode = DomainMode
+
+
+def resolve_allowed_topics(mode: DomainMode | str | None = None) -> list[AllowedTopic]:
+    """Resolve topic list for a domain mode (replaces ALLOWED_TOPICS parsing)."""
+    return topics_for_mode(mode)
