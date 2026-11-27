@@ -1,12 +1,13 @@
 """
 ANCHOR: tests.application.test_grounding_summary
-PURPOSE: Grounded answers are complete sentences; quotes not mid-chunk stubs.
+PURPOSE: Grounded answers are short human lines; quotes not mid-chunk stubs.
 Dependencies: GroundingService
 """
 
 from __future__ import annotations
 
 from app.application.grounding.service import GroundingService
+from app.domain.glossary import AbbreviationGlossary
 
 
 def test_ground_prefers_lexically_relevant_chunk() -> None:
@@ -34,7 +35,7 @@ def test_ground_prefers_lexically_relevant_chunk() -> None:
     ]
     result = svc.ground(
         candidates=candidates,
-        draft=None,
+        draft="Ответ: Менеджер по поставке (при отсутствии — АМ).",
         query="Кто отвечает за планирование поставок?",
     )
     assert result.ok
@@ -48,7 +49,7 @@ def test_ground_prefers_lexically_relevant_chunk() -> None:
 
 
 def test_ground_uses_draft_when_overlapping_chunk() -> None:
-    svc = GroundingService()
+    svc = GroundingService(glossary=AbbreviationGlossary.from_defaults())
     candidates = [
         {
             "document_id": "d1",
@@ -59,8 +60,7 @@ def test_ground_uses_draft_when_overlapping_chunk() -> None:
         }
     ]
     draft = (
-        "За планирование поставок отвечает Менеджер по поставке, "
-        "при его отсутствии — Аккаунт-менеджер."
+        "Ответ: За планирование поставок отвечает Менеджер по поставке."
     )
     result = svc.ground(candidates=candidates, draft=draft, query="планирование поставок")
     assert result.ok
@@ -90,7 +90,7 @@ def test_ground_answer_stops_before_next_numbered_clause() -> None:
     ]
     result = svc.ground(
         candidates=candidates,
-        draft=None,
+        draft="Ответ: Уполномоченные представители юридических лиц Компании.",
         query="Кто подписывает договоры на закупку?",
     )
     assert result.ok
@@ -98,8 +98,9 @@ def test_ground_answer_stops_before_next_numbered_clause() -> None:
     assert answer.startswith("Ответ:")
     assert "Источник:" in answer
     assert "Цитата:" in answer
-    assert "юридических лиц Компании." in answer
+    assert "юридических лиц Компании" in answer
     assert "**10" not in answer
+    assert "**9.5" not in answer.splitlines()[0]
     assert not answer.rstrip().endswith("**10.")
     assert result.citations[0]["locator"] == "9.5."
     quote = result.citations[0]["quote"] or ""
@@ -121,7 +122,7 @@ def test_ground_strips_think_from_draft_before_answer() -> None:
     ]
     dirty = (
         "<think>\nThe user asks who plans risks; cite the regulation.\n</think>\n"
-        f"{chunk}"
+        "Ответ: За планирование рисков отвечает руководитель проекта."
     )
     result = svc.ground(
         candidates=candidates, draft=dirty, query="Кто планирует риски?"

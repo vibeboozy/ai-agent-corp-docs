@@ -49,3 +49,19 @@ def test_enrich_text_disabled_noop() -> None:
     g = AbbreviationGlossary.from_defaults(enrich_ingest=False)
     msg = "РП и АМ"
     assert g.enrich_text(msg) == msg
+
+
+def test_expand_for_display_replaces_known_abbr() -> None:
+    g = AbbreviationGlossary.from_defaults()
+    out = g.expand_for_display("В течение дня назначается РП.")
+    assert "РП (Руководитель проекта)" in out
+    # Already expanded — leave as-is.
+    again = g.expand_for_display("РП (Руководитель проекта) отвечает за сроки.")
+    assert again.count("Руководитель проекта") == 1
+
+
+def test_expand_for_display_disabled_when_both_flags_off() -> None:
+    g = AbbreviationGlossary.from_defaults(expand_query=False, enrich_ingest=False)
+    msg = "Назначается РП."
+    assert g.expand_for_display(msg) == msg
+

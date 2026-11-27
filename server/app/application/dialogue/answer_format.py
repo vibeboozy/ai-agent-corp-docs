@@ -1,27 +1,33 @@
 """
 ANCHOR: app.application.dialogue.answer_format
 PURPOSE: Human-readable grounded answer shape (Ответ / Источник / Цитата).
-Dependencies: text_util; allowed_topics for system prompt
+Dependencies: text_util; allowed_topics; optional glossary
 CRITICAL: Источник/Цитата must come from grounded citations — never invent.
 DO:
-- Short direct Ответ; authoritative Источник + Цитата from retrieval
-- Adapt RCTIOSE priorities without tool-calling or user-visible CoT
+- Short direct Ответ without clause numbers; ≠ full quote
+- Authoritative Источник + Цитата from retrieval
+- Expand known abbreviations in user-facing Ответ when glossary active
 DONT:
-- Dump raw regulation prose as the only user-facing body
-- Duplicate long citation UI noise beyond the three-line template
+- Dump raw regulation prose / point numbers as Ответ
+- Set Ответ equal to Цитата
 """
 
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from app.application.text_util import (
     complete_sentences,
     cut_before_next_clause,
+    lexical_overlap,
     strip_think_blocks,
     truncate_at_sentence,
 )
 from app.domain.allowed_topics import format_topics_for_prompt
+
+if TYPE_CHECKING:
+    from app.domain.glossary import AbbreviationGlossary
 
 _ANSWER_LINE_RE = re.compile(
     r"(?im)^\s*(?:\*\*)?ответ(?:\*\*)?\s*:\s*(.+?)\s*$"
@@ -35,6 +41,19 @@ _QUOTE_BLOCK_RE = re.compile(
 _QUESTIONS_BLOCK_RE = re.compile(
     r"(?is)^\s*(?:\*\*)?вопросы\s+и\s+уточнения(?:\*\*)?\s*:.*$"
 )
+_ACCORDING_TO_RE = re.compile(
+    r"^Согласно\s+регламенту\s*«[^»]*»\s*:\s*",
+    re.IGNORECASE,
+)
+_LEADING_CLAUSE_RE = re.compile(
+    r"^(?:\*\*)?\d+(?:\.\d+)*\.?(?:\*\*)?\s+"
+)
+_INLINE_POINT_RE = re.compile(
+    r"(?:,?\s*)?\bп(?:ункт)?\.?\s*\d+(?:\.\d+)*\.?\b",
+    re.IGNORECASE,
+)
+_BOLD_CLAUSE_RE = re.compile(r"\*\*\d+(?:\.\d+)*\.?\*\*")
+_MAX_ANSWER_CHARS = 180
 
 
 def build_answer_system_prompt(topics_block: str | None = None) -> str:
@@ -66,20 +85,32 @@ def build_answer_system_prompt(topics_block: str | None = None) -> str:
         "верни ровно UNSUPPORTED.\n"
         "\n"
         "Формат выхода (ровно три строки, без преамбулы):\n"
-        "Ответ: <один короткий прямой ответ на вопрос>\n"
-        "Источник: «<название документа>», п. <пункт/раздел из passages>\n"
-        "Цитата: «<дословный фрагмент из passages, подтверждающий ответ>»\n"
+        "Ответ: <очень короткий прямой ответ — обычно до 15 слов>\n"
+        "Источник: «<название документа>», п. <пункт/раздел>\n"
+        "Цитата: «<дословный фрагмент из passages>»\n"
         "\n"
-        "Не добавляй «Вопросы и уточнения» для уверенного grounded-ответа.\n"
-        "Не дублируй длинные куски регламента в «Ответ» — там только суть.\n"
+        "Правила для поля «Ответ» (обязательно):\n"
+        "- Это человекочитаемая суть, НЕ копия регламента и НЕ копия «Цитата».\n"
+        "- ЗАПРЕЩЕНЫ номера пунктов/разделов (9.5, п. 2.7, **10.) и префикс "
+        "«Согласно регламенту».\n"
+        "- Раскрой известные аббревиатуры один раз: РП → РП (Руководитель проекта), "
+        "ДИБ → ДИБ (Дирекция информационной безопасности).\n"
         "\n"
-        "Хороший пример:\n"
+        "Хорошие примеры:\n"
+        "Ответ: Уполномоченные представители юридических лиц Компании.\n"
+        "Источник: «Пресейловая деятельность Дирекции ИБ», п. 9.5.\n"
+        "Цитата: «Договоры на закупку подписывают уполномоченные представители "
+        "юридических лиц Компании.»\n"
+        "\n"
         "Ответ: В течение одного рабочего дня при наличии полной информации.\n"
         "Источник: «Проектная деятельность Дирекции ИБ.docx», п. 2.7.\n"
         "Цитата: «Если предоставлена полная информация, Координатор департамента "
         "назначает РП в соответствии с итоговым Расчётом проекта в течение 1 рабочего дня.»\n"
         "\n"
-        "Плохой пример (запрещено): «Обычно РП назначается за 2-3 дня» без источника и цитаты.\n"
+        "Плохие примеры (запрещено):\n"
+        "- Ответ = длинный абзац из регламента с «**9.5.** …»\n"
+        "- Ответ совпадает с Цитатой целиком\n"
+        "- «Обычно РП назначается за 2-3 дня» без источника\n"
     )
 
 
@@ -90,7 +121,8 @@ def build_answer_user_prompt(*, question: str, passages: list[str]) -> str:
         "Passages (grounded retrieval — cite only these):\n"
         f"{joined}\n"
         "\n"
-        "Сформулируй краткий человекочитаемый ответ в формате Ответ / Источник / Цитата."
+        "Сформулируй краткий человекочитаемый ответ в формате Ответ / Источник / Цитата. "
+        "В «Ответ» — только суть без номеров пунктов; не копируй цитату."
     )
 
 
@@ -103,7 +135,6 @@ def extract_answer_body(text: str) -> str:
         m = _ANSWER_LINE_RE.match(line.strip())
         if m:
             return m.group(1).strip().strip("*").strip()
-    # Drop trailing Источник/Цитата/Вопросы blocks if model mixed formats.
     kept: list[str] = []
     for line in cleaned.splitlines():
         s = line.strip()
@@ -117,10 +148,60 @@ def extract_answer_body(text: str) -> str:
     return cut_before_next_clause(" ".join(kept).strip())
 
 
+def strip_regulation_noise(text: str) -> str:
+    """Remove clause numbers / «Согласно регламенту» noise from the Ответ body."""
+    text = cut_before_next_clause(strip_think_blocks(text or ""))
+    if not text:
+        return ""
+    # Drop leading "Ответ:" if present so cleaning applies to the body.
+    prefixed = False
+    low = text.lower()
+    if low.startswith("ответ:"):
+        text = text.split(":", 1)[1].strip()
+        prefixed = True
+    text = _ACCORDING_TO_RE.sub("", text).strip()
+    text = _LEADING_CLAUSE_RE.sub("", text).strip()
+    text = _BOLD_CLAUSE_RE.sub("", text)
+    text = _INLINE_POINT_RE.sub("", text)
+    text = re.sub(r"\s{2,}", " ", text).strip(" ,;")
+    if prefixed and text:
+        return f"Ответ: {text}"
+    return text
+
+
+def is_near_quote_duplicate(answer: str, quote: str) -> bool:
+    """True when Ответ is essentially the full цитата (too long / near-copy)."""
+    a = strip_regulation_noise(answer or "").lower().strip(" «»\"'.")
+    q = cut_before_next_clause(quote or "").lower().strip(" «»\"'.")
+    if not a or not q:
+        return False
+    if a == q:
+        return True
+    # Short noun-phrase answers that appear inside the quote are fine.
+    if len(a) <= 80 and a in q:
+        return False
+    if a in q or q in a:
+        return len(a) > 80
+    return lexical_overlap(a, q) >= 0.85 and len(a) > 100
+
+
+def normalize_short_answer(text: str, *, quote: str = "", max_chars: int = _MAX_ANSWER_CHARS) -> str:
+    """Produce a short human Ответ body (no clause dump, not a full quote copy)."""
+    body = strip_regulation_noise(extract_answer_body(text) or text)
+    if body.lower().startswith("ответ:"):
+        body = body.split(":", 1)[1].strip()
+    body = complete_sentences(body, max_chars=max_chars) if body else ""
+    if body and is_near_quote_duplicate(body, quote):
+        # Prefer a shorter lead phrase rather than reprinting the quote.
+        body = truncate_at_sentence(body, min(max_chars, 100))
+        if is_near_quote_duplicate(body, quote):
+            body = ""
+    return body.strip()
+
+
 def format_source_line(*, document_title: str, locator: str | None = None) -> str:
     title = (document_title or "").strip() or "Корпоративный регламент"
     loc = (locator or "").strip()
-    # Locators often look like "2.7." or "п. 2.7" — normalize to «…», п. 2.7.
     loc = re.sub(r"^п(?:ункт)?\.?\s*", "", loc, flags=re.IGNORECASE).rstrip(".")
     if loc:
         return f"Источник: «{title}», п. {loc}."
@@ -138,15 +219,20 @@ def format_human_answer(
     document_title: str,
     locator: str | None = None,
     quote: str,
+    glossary: AbbreviationGlossary | None = None,
 ) -> str:
     """Assemble the three-line body shown before the citations UI."""
-    body = extract_answer_body(answer) or cut_before_next_clause(answer)
-    body = complete_sentences(body, max_chars=400) if body else ""
+    body = normalize_short_answer(answer, quote=quote)
     if not body:
-        body = complete_sentences(quote or "", max_chars=400)
+        # Last resort: short cleaned fragment of the supporting clause — never full quote dump.
+        body = normalize_short_answer(quote or "", quote="")
+        if is_near_quote_duplicate(body, quote):
+            body = truncate_at_sentence(strip_regulation_noise(quote or ""), 90)
     body = body.strip()
     if not body:
         return ""
+    if glossary is not None:
+        body = glossary.expand_for_display(body)
     if not body.lower().startswith("ответ:"):
         body = f"Ответ: {body}"
     return "\n".join(
@@ -165,8 +251,12 @@ def summary_from_answer(answer_text: str, max_len: int = 480) -> str:
     cleaned = strip_think_blocks(answer_text or "")
     body = extract_answer_body(cleaned)
     if body:
-        line = body if body.lower().startswith("ответ:") else f"Ответ: {body}"
-        if len(line) <= max_len:
+        body = strip_regulation_noise(body)
+        if body.lower().startswith("ответ:"):
+            body = body.split(":", 1)[1].strip()
+        line = f"Ответ: {body}" if body else ""
+        if line and len(line) <= max_len:
             return line
-        return truncate_at_sentence(line, max_len)
+        if line:
+            return truncate_at_sentence(line, max_len)
     return truncate_at_sentence(cleaned, max_len)
