@@ -14,6 +14,10 @@ export class QualityTab {
   constructor(container) {
     this.container = container;
     this.unsubscribe = null;
+    /** @type {boolean} */
+    this._refreshInFlight = false;
+    /** @type {string | null} */
+    this._resolveInFlightId = null;
   }
 
   /**
@@ -110,6 +114,8 @@ export class QualityTab {
 
     const refreshBtn = this.container.querySelector('#refresh-tickets-btn');
     refreshBtn.addEventListener('click', async () => {
+      if (this._refreshInFlight || refreshBtn.disabled) return;
+      this._refreshInFlight = true;
       refreshBtn.disabled = true;
       try {
         await this.loadTickets();
@@ -117,6 +123,7 @@ export class QualityTab {
       } catch (err) {
         toastError(err.message || 'Ошибка обновления списка');
       } finally {
+        this._refreshInFlight = false;
         refreshBtn.disabled = false;
       }
     });
@@ -459,6 +466,9 @@ export class QualityTab {
 
       resolveForm.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (this._resolveInFlightId === ticket.ticket_id || submitBtn.disabled) {
+          return;
+        }
         const answer = answerInput.value.trim();
         const regulation_ref = refInput.value.trim();
 
@@ -467,6 +477,7 @@ export class QualityTab {
           return;
         }
 
+        this._resolveInFlightId = ticket.ticket_id;
         submitBtn.disabled = true;
         submitBtn.innerHTML = `<span>Сохранение...</span>`;
 
@@ -542,6 +553,7 @@ export class QualityTab {
             regulation_ref
           });
           applyResolved(updatedTicket.resolved_at);
+          this._resolveInFlightId = null;
         } catch (err) {
           // Сетевой обрыв не означает, что бэкенд не сохранил ответ: он мог довести
           // операцию уже после разрыва соединения. Проверяем фактический статус,
@@ -557,9 +569,11 @@ export class QualityTab {
 
           if (recovered) {
             applyResolved(recovered.resolved_at, 'Ответ дошёл до сервера, несмотря на обрыв соединения. База знаний пополнена!');
+            this._resolveInFlightId = null;
             return;
           }
 
+          this._resolveInFlightId = null;
           submitBtn.disabled = false;
           submitBtn.innerHTML = `<span>Сохранить ответ и пополнить базу знаний</span>`;
           toastError(err.message || 'Ошибка сохранения ответа');

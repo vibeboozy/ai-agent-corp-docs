@@ -30,6 +30,19 @@ def _local_text_chunks(*, text: str, job_id: str) -> list[dict[str, Any]]:
     return [{"chunk_id": f"c-{job_id[:8]}", "text": text}]
 
 
+def _collapse_duplicate_chunks(chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop Docling windows that repeat the same body (common on short officer replies)."""
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for chunk in chunks:
+        body = " ".join(str(chunk.get("text") or "").split()).casefold()
+        if not body or body in seen:
+            continue
+        seen.add(body)
+        out.append(chunk)
+    return out or list(chunks[:1]) if chunks else []
+
+
 class IngestService:
     def __init__(
         self,
@@ -81,6 +94,7 @@ class IngestService:
         job_id = str(uuid4())
         doc_id = document_id or f"learned-{job_id[:8]}"
         raw_chunks, used_local_fallback = await self._chunks_for_text(text=text, job_id=job_id)
+        raw_chunks = _collapse_duplicate_chunks(raw_chunks)
         # Expand abbreviations into chunk TEXT before embed so dense/sparse see them.
         enriched_chunks: list[dict[str, Any]] = []
         for chunk in raw_chunks:

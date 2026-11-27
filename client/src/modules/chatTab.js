@@ -4,12 +4,15 @@ import { DEMO_PROMPTS } from '../config.js';
 import { escapeHtml, formatTextWithLineBreaks, formatTimeShort, formatSessionDate, autoResizeTextarea } from '../utils/dom.js';
 import { toastSuccess, toastError } from '../utils/toast.js';
 import { canSendInAppeal, isServerAppealId } from '../utils/appealHelpers.js';
+import { dedupeCitations } from '../utils/citations.js';
 
 export class ChatTab {
   constructor(container) {
     this.container = container;
     this.unsubscribe = null;
     this.renderedMessagesCount = 0;
+    /** @type {Set<string>} message ids with in-flight ticket submit */
+    this._ticketSubmitInFlight = new Set();
   }
 
   mount() {
@@ -143,11 +146,11 @@ export class ChatTab {
       }
     });
 
-    // Отправка формы
+    // Отправка формы (disabled + chatLoading block double submit)
     form.addEventListener('submit', (e) => {
       e.preventDefault();
       const question = textarea.value.trim();
-      if (!question || store.getState().chatLoading) return;
+      if (!question || store.getState().chatLoading || sendBtn.disabled) return;
 
       textarea.value = '';
       autoResizeTextarea(textarea, 120);
@@ -525,9 +528,10 @@ export class ChatTab {
       `;
     }
 
-    // Блок цитат
+    // Блок цитат (safety-net dedupe: learned re-ask may still send identical quotes)
     let citationsHtml = '';
-    if (msg.citations && msg.citations.length > 0) {
+    const uniqueCitations = dedupeCitations(msg.citations || []);
+    if (uniqueCitations.length > 0) {
       citationsHtml = `
         <details class="citations-card" open>
           <summary class="citations-summary">
@@ -536,10 +540,10 @@ export class ChatTab {
               <path d="M6 6h10"/>
               <path d="M6 10h10"/>
             </svg>
-            Источники и цитаты (${msg.citations.length})
+            Источники и цитаты (${uniqueCitations.length})
           </summary>
           <div class="citations-list">
-            ${msg.citations.map((c) => `
+            ${uniqueCitations.map((c) => `
               <div class="citation-item">
                 <div class="citation-meta">
                   <span>${escapeHtml(c.doc_name || 'Корпоративный регламент')}</span>
@@ -652,6 +656,9 @@ export class ChatTab {
         if (!card) return;
 
         const msgId = card.getAttribute('data-msg-id');
+        if (!msgId || this._ticketSubmitInFlight.has(msgId) || btn.disabled) {
+          return;
+        }
         const subjectInput = card.querySelector('.input-email-subject');
         const bodyInput = card.querySelector('.input-email-body');
 
@@ -672,6 +679,7 @@ export class ChatTab {
           }
         }
 
+        this._ticketSubmitInFlight.add(msgId);
         btn.disabled = true;
         btn.innerHTML = `<span>Отправка...</span>`;
 
@@ -711,6 +719,7 @@ export class ChatTab {
 
           toastSuccess(`Запрос №${ticketId} отправлен в Службу качества!`);
         } catch (err) {
+          this._ticketSubmitInFlight.delete(msgId);
           btn.disabled = false;
           btn.innerHTML = `<span>Отправить в Службу качества</span>`;
           toastError(err.message || 'Ошибка отправки тикета');

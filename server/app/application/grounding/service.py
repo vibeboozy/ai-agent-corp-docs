@@ -125,6 +125,51 @@ class GroundingResult:
     needs_repair: bool = False
 
 
+def _norm_cite_text(value: str | None) -> str:
+    """Collapse whitespace for citation identity (learned re-asks often share quotes)."""
+    return " ".join(str(value or "").split()).casefold()
+
+
+def dedupe_citations(
+    citations: list[dict[str, Any]],
+    *,
+    max_n: int = 3,
+) -> list[dict[str, Any]]:
+    """
+    Unique citations for the UI block «Источники и цитаты».
+
+    Keys (in order): chunk_id; then document_id + locator + quote; then quote alone
+    so identical learned chunks from separate ingest jobs (different document_id)
+    collapse to one entry matching the canonical Ответ/Источник/Цитата form.
+    """
+    seen_chunk: set[str] = set()
+    seen_doc_key: set[tuple[str, str, str]] = set()
+    seen_quote: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for c in citations:
+        if len(out) >= max_n:
+            break
+        chunk_id = str(c.get("chunk_id") or "").strip()
+        if chunk_id and chunk_id in seen_chunk:
+            continue
+        doc = str(c.get("document_id") or "").strip()
+        loc = _norm_cite_text(str(c.get("locator") or ""))
+        quote = _norm_cite_text(str(c.get("quote") or ""))
+        quote_key = quote[:240] if quote else ""
+        doc_key = (doc, loc, quote_key)
+        if doc_key in seen_doc_key:
+            continue
+        if quote_key and quote_key in seen_quote:
+            continue
+        if chunk_id:
+            seen_chunk.add(chunk_id)
+        seen_doc_key.add(doc_key)
+        if quote_key:
+            seen_quote.add(quote_key)
+        out.append(c)
+    return out
+
+
 class GroundingService:
     """Require min citations above score + query relevance; build human answers."""
 
@@ -461,14 +506,14 @@ class GroundingService:
         # Try candidates in support order until a short paraphrase grounds.
         last_citations: list[dict[str, Any]] = []
         for top in ordered:
-            citations: list[dict[str, Any]] = []
+            raw_citations: list[dict[str, Any]] = []
             for c in [top] + [x for x in ordered if x is not top]:
-                if len(citations) >= 3:
+                if len(raw_citations) >= 8:
                     break
                 point = normalize_locator(
                     str(c.get("locator") or c.get("section_title") or "")
                 )
-                citations.append(
+                raw_citations.append(
                     {
                         "document_id": c["document_id"],
                         "chunk_id": c["chunk_id"],
@@ -476,8 +521,17 @@ class GroundingService:
                         "score": float(c.get("score") or 0.0),
                         "document_title": c.get("document_title"),
                         "locator": point,
+                        "source": c.get("source"),
                     }
                 )
+            # Canonical/learned re-ask: answer form shows one Источник/Цитата —
+            # keep a single unique citation when the top hit is learned.
+            max_cite = 1 if str(top.get("source") or "") == "learned" else 3
+            citations = dedupe_citations(raw_citations, max_n=max_cite)
+            # Drop internal source marker from API payload shape.
+            citations = [
+                {k: v for k, v in cite.items() if k != "source"} for cite in citations
+            ]
             last_citations = citations
 
             title = str(top.get("document_title") or top["document_id"])
