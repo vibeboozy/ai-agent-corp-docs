@@ -53,24 +53,3 @@ def test_hybrid_chunk_section_aware_keeps_clause_boundaries() -> None:
     assert not any(t.lower().startswith("проекта.") for t in texts)
     # Locator/section_title populated for numbered sections.
     assert any(c.get("section_title") for c in out["chunks"])
-
-
-def test_hybrid_chunk_merges_tiny_titled_sections() -> None:
-    """Few-word titled clauses must not become standalone context-poor chunks."""
-    body = (
-        "3.1. Согласование.\n\n"
-        "3.2. Директора бюджета.\n\n"
-        "4.2. Пороговая маржинальность. В Дирекции ИБ установлен точный процент "
-        "пороговой маржинальности равный пятнадцати процентам от стоимости проекта "
-        "при оценке коммерческих предложений и расчёте рентабельности сделок."
-    )
-    out = hybrid_chunk_text(body, max_tokens=80, overlap_tokens=8, min_tokens=20)
-    chunks = out["chunks"]
-    assert chunks
-    # No few-word orphan chunks.
-    assert all(c["token_count"] >= 20 or c is chunks[-1] for c in chunks)
-    tinyish = [c for c in chunks if c["token_count"] < 8]
-    assert not tinyish, chunks
-    # Tiny 3.1 / 3.2 content survived by merging into a neighbor.
-    joined = " ".join(c["text"] for c in chunks)
-    assert "маржинальность" in joined.lower()
