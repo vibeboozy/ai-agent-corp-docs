@@ -26,11 +26,8 @@ from app.adapters.llm.port import LLMClient
 from app.application.text_util import strip_think_blocks
 from app.domain.allowed_topics import (
     AllowedTopic,
-    DomainMode,
     format_topics_for_prompt,
-    is_legal_mode,
-    resolve_prompt_mode,
-    topics_for_mode,
+    resolve_allowed_topics,
 )
 from app.domain.errors import AppError, UpstreamTimeoutError
 
@@ -84,7 +81,6 @@ class HttpLLMClient:
         max_tokens: int = 1500,
         reasoning_tokens: int = 0,
         allow_hosts: set[str] | None = None,
-        domain_mode: DomainMode | str | None = None,
         allowed_topics: list[AllowedTopic] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -95,12 +91,7 @@ class HttpLLMClient:
         self._max_tokens = max_tokens
         self._reasoning_tokens = max(0, int(reasoning_tokens))
         self._allow_hosts = allow_hosts or set()
-        self._domain_mode: DomainMode = resolve_prompt_mode(domain_mode)
-        self._allowed_topics = (
-            list(allowed_topics)
-            if allowed_topics is not None
-            else topics_for_mode(self._domain_mode)
-        )
+        self._allowed_topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
         self._assert_host_allowed()
 
     @property
@@ -171,12 +162,6 @@ class HttpLLMClient:
     ) -> str:
         hist = "\n".join(history or [])
         topics_block = format_topics_for_prompt(self._allowed_topics)
-        legal_note = ""
-        if is_legal_mode(self._domain_mode):
-            legal_note = (
-                " Questions about listed legal corpora "
-                "(Конституция РФ / Трудовой кодекс РФ) are in-domain, not off_topic."
-            )
         prompt = (
             "Classify the user question as one of: "
             "underspecified, ambiguous, specific, off_topic.\n"
@@ -185,12 +170,12 @@ class HttpLLMClient:
             "Rules:\n"
             "- off_topic: chitchat or asks outside the in-domain topics above "
             "(e.g. сколько времени, какая погода, расскажи анекдот). "
-            "Do NOT label as off_topic questions about any listed in-domain topic."
-            f"{legal_note}\n"
+            "Do NOT label as off_topic questions about any listed in-domain topic "
+            "(including Конституция РФ / Трудовой кодекс РФ when configured).\n"
             "- specific: asks who/what for a concrete role+topic "
             "(e.g. кто отвечает за организацию отчётности по проекту, "
             "кто подписывает договоры на закупку) OR a concrete ask about an "
-            "in-domain document/corpus that was ingested. Prefer specific "
+            "in-domain legal/regulatory document that was ingested. Prefer specific "
             "when both a role-seeking cue and a concrete topic are present.\n"
             "- ambiguous: could map to two+ distinct regulation scopes "
             "(e.g. кто подписывает договоры — закупка vs подряд).\n"

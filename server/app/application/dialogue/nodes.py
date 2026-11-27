@@ -38,10 +38,9 @@ from app.application.retrieval.service import RetrievalService
 from app.application.text_util import strip_think_blocks
 from app.domain.allowed_topics import (
     AllowedTopic,
-    DomainMode,
     build_refusal_message,
     format_topics_for_prompt,
-    topics_for_mode,
+    resolve_allowed_topics,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,8 +52,7 @@ class DialogueDeps:
     retrieval: RetrievalService
     grounding: GroundingService
     quality_email: str
-    domain_mode: DomainMode = "regs_only"
-    allowed_topics: list[AllowedTopic] = field(default_factory=lambda: topics_for_mode("regs_only"))
+    allowed_topics: list[AllowedTopic] = field(default_factory=resolve_allowed_topics)
 
 
 def _trace(state: DialogueState, node: str) -> list[str]:
@@ -212,11 +210,9 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
                     f"[{idx}] ({loc}) {c.get('text')}"
                 )
             t0 = time.perf_counter()
+            topics_block = format_topics_for_prompt(list(deps.allowed_topics))
             draft = await deps.llm.complete(
-                system=build_answer_system_prompt(
-                    topics=list(deps.allowed_topics),
-                    domain_mode=deps.domain_mode,
-                ),
+                system=build_answer_system_prompt(topics_block),
                 user=build_answer_user_prompt(
                     question=user_message, passages=passages
                 ),
@@ -244,8 +240,7 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             t1 = time.perf_counter()
             repaired = await deps.llm.complete(
                 system=build_answer_system_prompt(
-                    topics=list(deps.allowed_topics),
-                    domain_mode=deps.domain_mode,
+                    format_topics_for_prompt(list(deps.allowed_topics))
                 ),
                 user=build_paraphrase_repair_prompt(
                     question=user_message,

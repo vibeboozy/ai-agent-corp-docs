@@ -131,8 +131,9 @@ class Settings(BaseSettings):
     grounding_min_query_overlap: float = Field(
         default=0.12, alias="GROUNDING_MIN_QUERY_OVERLAP"
     )
-    # Domain / answer-prompt mode: regs_only (default) or regs_legal (bakes Конституция+ТК).
-    dialogue_domain_mode: str = Field(default="regs_only", alias="DIALOGUE_DOMAIN_MODE")
+    # Extra in-domain topics beyond corporate regulations (labels / label=description).
+    # Used by off-topic heuristic, classify prompt, and refusal text. Docs must be ingested.
+    allowed_topics: str | None = Field(default=None, alias="ALLOWED_TOPICS")
 
     # --- abbreviation glossary (query expand + optional ingest metadata) ---
     # Empty ABBREVIATION_GLOSSARY / PATH → built-in corporate default list.
@@ -176,17 +177,11 @@ class Settings(BaseSettings):
             return set()
         return {h.strip().lower() for h in self.egress_allow_hosts.split(",") if h.strip()}
 
-    def resolved_domain_mode(self):
-        """Normalize DIALOGUE_DOMAIN_MODE → regs_only | regs_legal."""
-        from app.domain.allowed_topics import resolve_prompt_mode
-
-        return resolve_prompt_mode(self.dialogue_domain_mode)
-
     def resolved_allowed_topics(self):
-        """In-domain topics for the configured domain mode (baked legal set when regs_legal)."""
-        from app.domain.allowed_topics import topics_for_mode
+        """Core corporate topic + extras from ALLOWED_TOPICS."""
+        from app.domain.allowed_topics import resolve_allowed_topics
 
-        return topics_for_mode(self.resolved_domain_mode())
+        return resolve_allowed_topics(self.allowed_topics)
 
 
 @lru_cache

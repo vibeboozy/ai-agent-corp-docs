@@ -63,20 +63,45 @@ async def _run_ingest(path: str, *, document_title: str | None) -> int:
                 file=sys.stderr,
             )
             return 2
-    try:
-        # Shared IngestService path: glossary enrich + embed-limit split + upsert.
-        result = await container.ingest.ingest_file(
-            source_path=src.resolve(),
-            document_title=document_title,
+    converted = await container.docling.convert(source_path=str(src.resolve()))
+    chunks = converted.get("chunks") or []
+    if not chunks:
+        print("error: Docling returned no chunks", file=sys.stderr)
+        return 1
+    title = document_title or src.stem
+    glossary = getattr(container, "glossary", None)
+    # Expand abbreviations into chunk TEXT before embed (dense + sparse).
+    enriched = []
+    for chunk in chunks:
+        body = str(chunk.get("text") or "")
+        if glossary is not None:
+            body = glossary.enrich_text(body)
+        enriched.append({**chunk, "text": body})
+    texts = [c["text"] for c in enriched]
+    vectors = await container.embeddings.embed_dense(texts)
+    sparse_maps = await container.embeddings.embed_sparse(texts)
+    upserts = []
+    for idx, chunk in enumerate(enriched):
+        meta: dict = {"source_path": str(src)}
+        if chunk.get("section_title"):
+            meta["section_title"] = chunk["section_title"]
+        if glossary is not None:
+            meta = glossary.enrich_metadata(str(chunk["text"]), meta)
+        upserts.append(
+            {
+                "document_id": f"doc-{src.stem}",
+                "chunk_id": chunk.get("chunk_id") or f"c-{idx}",
+                "text": chunk["text"],
+                "document_title": title,
+                "source": "ingest",
+                "locator": chunk.get("locator") or chunk.get("section_title"),
+                "dense_vector": vectors[idx] if idx < len(vectors) else None,
+                "sparse_vector": sparse_maps[idx] if idx < len(sparse_maps) else None,
+                "metadata": meta,
+            }
         )
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    except Exception as exc:  # noqa: BLE001 — CLI surface upstream/convert failures
-        print(f"error: ingest failed: {exc}", file=sys.stderr)
-        return 1
-    title = result.get("document_title") or document_title or src.stem
-    print(f"ingested {result['chunks']} chunks from {src.name} title={title!r}")
+    await container.vectorstore.upsert(upserts)
+    print(f"ingested {len(upserts)} chunks from {src.name} title={title!r}")
     return 0
 
 

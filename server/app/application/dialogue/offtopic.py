@@ -4,7 +4,7 @@ PURPOSE: Detect off-topic chitchat; refuse politely (in-domain topics only).
 Dependencies: re, unicodedata; domain.allowed_topics
 DO:
 - Catch clear non-domain asks (time, weather, jokes, identity)
-- Treat baked legal topic cues (regs_legal mode) as in-domain
+- Treat configured ALLOWED_TOPICS cues as in-domain (not heuristic refuse)
 DONT:
 - Refuse regulation / allowed-topic questions that mention time/weather as context
 """
@@ -20,7 +20,7 @@ from app.domain.allowed_topics import (
     CORE_ALLOWED_TOPIC,
     build_refusal_message,
     mentions_allowed_topic,
-    topics_for_mode,
+    resolve_allowed_topics,
 )
 
 # Standalone chitchat / unsupported asks (whole-message or dominant intent).
@@ -71,7 +71,7 @@ def is_supported_domain(
         return False
     if _REGULATION_CUE_RE.search(msg):
         return True
-    topics = list(allowed_topics) if allowed_topics is not None else topics_for_mode("regs_only")
+    topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
     return mentions_allowed_topic(msg, list(topics))
 
 
@@ -86,7 +86,7 @@ def is_off_topic(
 
     History is ignored for detection — off-topic is judged on the current message.
     Messages that clearly name a regulation process or allowed topic are never refused here.
-    Clear chitchat patterns (weather/time/jokes) stay refused even in regs_legal mode.
+    Clear chitchat patterns (weather/time/jokes) stay refused even if ALLOWED_TOPICS is set.
     """
     _ = history
     msg = _normalize(user_message)

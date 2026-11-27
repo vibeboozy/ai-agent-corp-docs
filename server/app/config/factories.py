@@ -60,7 +60,6 @@ def _build_llm(settings: Settings) -> Any:
         max_tokens=settings.llm_max_tokens,
         reasoning_tokens=settings.llm_reasoning_tokens,
         allow_hosts=settings.egress_hosts(),
-        domain_mode=settings.resolved_domain_mode(),
         allowed_topics=settings.resolved_allowed_topics(),
     )
 
@@ -199,7 +198,6 @@ def build_container(settings: Settings | None = None) -> Container:
         retrieval=retrieval,
         grounding=grounding,
         quality_email=settings.quality_service_email,
-        domain_mode=settings.resolved_domain_mode(),
         allowed_topics=settings.resolved_allowed_topics(),
     )
     dialogue = DialogueService(

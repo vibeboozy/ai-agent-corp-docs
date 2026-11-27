@@ -62,17 +62,17 @@ async def test_http_classify_uses_strip_path(monkeypatch: pytest.MonkeyPatch) ->
 
 
 @pytest.mark.asyncio
-async def test_classify_prompt_includes_legal_topics_in_regs_legal(
+async def test_classify_prompt_includes_allowed_topics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from app.domain.allowed_topics import topics_for_mode
+    from app.domain.allowed_topics import resolve_allowed_topics
 
+    topics = resolve_allowed_topics("Конституция РФ=основной закон")
     client = HttpLLMClient(
         base_url="https://example.invalid/v1",
         api_key=None,
         model="test",
-        domain_mode="regs_legal",
-        allowed_topics=topics_for_mode("regs_legal"),
+        allowed_topics=topics,
     )
     captured: dict[str, str] = {}
 
@@ -85,32 +85,7 @@ async def test_classify_prompt_includes_legal_topics_in_regs_legal(
     assert await client.classify_specificity("Статья Конституции о правах?") == "specific"
     assert "In-domain topics" in captured["user"]
     assert "Конституция РФ" in captured["user"]
-    assert "Трудовой кодекс РФ" in captured["user"]
     assert "корпоративные регламенты" in captured["user"]
-    assert "Конституция РФ / Трудовой кодекс РФ" in captured["user"]
-
-
-@pytest.mark.asyncio
-async def test_classify_prompt_regs_only_omits_legal_note(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    client = HttpLLMClient(
-        base_url="https://example.invalid/v1",
-        api_key=None,
-        model="test",
-        domain_mode="regs_only",
-    )
-    captured: dict[str, str] = {}
-
-    async def fake_complete(*, system: str, user: str, temperature: float | None = None) -> str:
-        _ = (system, temperature)
-        captured["user"] = user
-        return "specific"
-
-    monkeypatch.setattr(client, "complete", fake_complete)
-    assert await client.classify_specificity("Кто назначает РП?") == "specific"
-    assert "Конституция РФ / Трудовой кодекс РФ" not in captured["user"]
-    assert "Конституция РФ" not in captured["user"]
 
 
 @pytest.mark.asyncio

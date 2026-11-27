@@ -292,7 +292,7 @@ Documented in `.env.example` (this directory). Groups:
 - **Quality** — `QUALITY_SERVICE_EMAIL`, escalation toggles
 - **Cache / Log** — operational knobs
 - **Abbreviation glossary** — built-in corporate abbr list; `ABBREVIATION_*` for query expand + ingest metadata
-- **Domain mode** — `DIALOGUE_DOMAIN_MODE=regs_only|regs_legal` selects gate / classify / refuse topics and answer-prompt composition (`regs_legal` bakes Конституция РФ + ТК РФ; ingest those docs first)
+- **Allowed topics** — `ALLOWED_TOPICS` extras beyond corporate regs for domain-gate / classify / refuse (docs must be ingested)
 - **Tests** — integration/e2e skip unless services answer ping
 
 **CRITICAL:** Runtime always uses real providers. Configure URLs/keys in `.env`. Unit tests may mock HTTP; product demos need live infra (`rag-server check`).
