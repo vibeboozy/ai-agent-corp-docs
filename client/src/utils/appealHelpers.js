@@ -188,6 +188,48 @@ export function mergeLocalEscalationState(serverMessages, localMessages) {
 }
 
 /**
+ * Compare chat message lists for feed-render equivalence.
+ * Used to skip wholesale DOM remounts when a history reload returns the same UI.
+ */
+export function areChatMessagesRenderEqual(a, b) {
+  if (a === b) return true;
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+
+  for (let i = 0; i < a.length; i++) {
+    const left = a[i] || {};
+    const right = b[i] || {};
+    if (String(left.id) !== String(right.id)) return false;
+    if (left.role !== right.role) return false;
+    if (left.content !== right.content) return false;
+    if ((left.status || '') !== (right.status || '')) return false;
+    if (Boolean(left.ticketCreated) !== Boolean(right.ticketCreated)) return false;
+    if (String(left.ticketId || '') !== String(right.ticketId || '')) return false;
+
+    const leftDraft = left.email_draft || null;
+    const rightDraft = right.email_draft || null;
+    if (Boolean(leftDraft) !== Boolean(rightDraft)) return false;
+    if (leftDraft && rightDraft) {
+      if ((leftDraft.to || '') !== (rightDraft.to || '')) return false;
+      if ((leftDraft.subject || '') !== (rightDraft.subject || '')) return false;
+      if ((leftDraft.body || '') !== (rightDraft.body || '')) return false;
+    }
+
+    const leftCitations = left.citations || [];
+    const rightCitations = right.citations || [];
+    if (leftCitations.length !== rightCitations.length) return false;
+    for (let c = 0; c < leftCitations.length; c++) {
+      const lc = leftCitations[c] || {};
+      const rc = rightCitations[c] || {};
+      if ((lc.doc_name || '') !== (rc.doc_name || '')) return false;
+      if ((lc.section || '') !== (rc.section || '')) return false;
+      if ((lc.quote || '') !== (rc.quote || '')) return false;
+    }
+  }
+  return true;
+}
+
+/**
  * Server allows further turns unless appeal is closed (409 CONFLICT_STATUS).
  * answered / clarifying / escalated / open → continue; closed → new chat.
  */
