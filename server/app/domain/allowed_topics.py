@@ -5,6 +5,7 @@ Dependencies: stdlib only; Settings ALLOWED_TOPICS
 DO:
 - Always include corporate regulations as the core in-domain topic
 - Parse extra labels/descriptions from env for future corpora (e.g. Конституция РФ)
+- Detect regs-only vs regs+legal prompt mode from extras
 DONT:
 - Treat weather/chitchat as in-domain just because ALLOWED_TOPICS is set
 """
@@ -14,6 +15,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+from typing import Literal
 
 
 @dataclass(frozen=True)
@@ -39,6 +41,15 @@ CORE_ALLOWED_TOPIC = AllowedTopic(
         "отчётность, отпуска, бренд"
     ),
 )
+
+# Cue substrings (normalized) that flip answer prompts into regs+legal mode.
+_LEGAL_TOPIC_CUES: tuple[str, ...] = (
+    "конституция",
+    "трудовой кодекс",
+    "тк рф",
+)
+
+PromptMode = Literal["regs_only", "regs_legal"]
 
 
 def _normalize(text: str) -> str:
@@ -96,6 +107,32 @@ def format_topics_for_prompt(topics: list[AllowedTopic] | None) -> str:
     """Bullet list for classify / answer system prompts."""
     items = topics or [CORE_ALLOWED_TOPIC]
     return "\n".join(t.prompt_line() for t in items)
+
+
+def _topic_blob(topic: AllowedTopic) -> str:
+    return _normalize(f"{topic.label} {topic.description}").lower()
+
+
+def includes_legal_topics(topics: list[AllowedTopic] | None) -> bool:
+    """
+    True when ALLOWED_TOPICS extras cover Конституция РФ and/or Трудовой кодекс РФ.
+
+    Used to compose answer prompts: regs-only vs regs + legal addendum.
+    Core corporate topic alone never enables legal mode.
+    """
+    core_key = _normalize(CORE_ALLOWED_TOPIC.label).lower()
+    for topic in topics or []:
+        if _normalize(topic.label).lower() == core_key:
+            continue
+        blob = _topic_blob(topic)
+        if any(cue in blob for cue in _LEGAL_TOPIC_CUES):
+            return True
+    return False
+
+
+def resolve_prompt_mode(topics: list[AllowedTopic] | None = None) -> PromptMode:
+    """regs_only (default) or regs_legal when legal corpora are configured."""
+    return "regs_legal" if includes_legal_topics(topics) else "regs_only"
 
 
 def build_refusal_message(topics: list[AllowedTopic] | None = None) -> str:

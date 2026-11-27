@@ -210,9 +210,9 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
                     f"[{idx}] ({loc}) {c.get('text')}"
                 )
             t0 = time.perf_counter()
-            topics_block = format_topics_for_prompt(list(deps.allowed_topics))
+            allowed = list(deps.allowed_topics)
             draft = await deps.llm.complete(
-                system=build_answer_system_prompt(topics_block),
+                system=build_answer_system_prompt(topics=allowed),
                 user=build_answer_user_prompt(
                     question=user_message, passages=passages
                 ),
@@ -239,9 +239,7 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             bad = final_body or extract_answer_body(draft or "") or (draft or "")[:240]
             t1 = time.perf_counter()
             repaired = await deps.llm.complete(
-                system=build_answer_system_prompt(
-                    format_topics_for_prompt(list(deps.allowed_topics))
-                ),
+                system=build_answer_system_prompt(topics=list(deps.allowed_topics)),
                 user=build_paraphrase_repair_prompt(
                     question=user_message,
                     quote=quote,

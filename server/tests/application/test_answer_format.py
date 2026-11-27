@@ -7,6 +7,7 @@ Dependencies: dialogue.answer_format; GroundingService; glossary
 from __future__ import annotations
 
 from app.application.dialogue.answer_format import (
+    answer_prompt_mode,
     build_answer_system_prompt,
     build_answer_user_prompt,
     enforce_short_paraphrase,
@@ -17,6 +18,7 @@ from app.application.dialogue.answer_format import (
     summary_from_answer,
 )
 from app.application.grounding.service import GroundingService
+from app.domain.allowed_topics import resolve_allowed_topics
 from app.domain.glossary import AbbreviationGlossary
 
 
@@ -26,8 +28,45 @@ def test_system_prompt_forbids_clause_dump_and_quote_copy() -> None:
     assert "Юридические лица Компании" in prompt
     assert "заключаются от" in prompt  # negative example
     assert "РП (Руководитель проекта)" in prompt
-    assert "УЖЕ выполнен" in prompt
+    assert "passages" in prompt.lower()
     assert "UNSUPPORTED" in prompt
+    # topics_block-only → regs-only (no legal addendum)
+    assert "Трудовой кодекс" not in prompt
+    assert "Конституция" not in prompt
+    assert "ст. 91" not in prompt
+
+
+def test_regs_only_prompt_mode_strips_legal() -> None:
+    topics = resolve_allowed_topics(None)
+    assert answer_prompt_mode(topics) == "regs_only"
+    prompt = build_answer_system_prompt(topics=topics)
+    assert "корпоративн" in prompt.lower()
+    assert "learned" in prompt.lower() or "экспертн" in prompt.lower()
+    assert "clarify" in prompt.lower() or "escalate" in prompt.lower()
+    assert "Трудовой кодекс" not in prompt
+    assert "Конституция" not in prompt
+    assert "ст. 91" not in prompt
+    assert "search_legal" not in prompt
+
+
+def test_regs_legal_prompt_mode_adds_addendum() -> None:
+    topics = resolve_allowed_topics(
+        "Конституция РФ=основной закон;Трудовой кодекс РФ=трудовые отношения"
+    )
+    assert answer_prompt_mode(topics) == "regs_legal"
+    prompt = build_answer_system_prompt(topics=topics)
+    assert "regs+legal" in prompt or "законодательств" in prompt.lower()
+    assert "Трудовой кодекс" in prompt
+    assert "Конституция" in prompt
+    assert "ст. 91" in prompt
+    assert "40 часов" in prompt
+    assert "не смешивай" in prompt.lower() or "Не смешивай" in prompt
+    # Shared base still present
+    assert "Юридические лица Компании" in prompt
+    assert "UNSUPPORTED" in prompt
+    # No fake tool-calling UX
+    assert "search_legal(" not in prompt
+    assert "search_corporate_docs(" not in prompt
 
 
 def test_user_prompt_lists_passages() -> None:

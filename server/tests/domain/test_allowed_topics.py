@@ -11,9 +11,11 @@ from app.domain.allowed_topics import (
     AllowedTopic,
     build_refusal_message,
     format_topics_for_prompt,
+    includes_legal_topics,
     mentions_allowed_topic,
     parse_allowed_topics,
     resolve_allowed_topics,
+    resolve_prompt_mode,
 )
 
 
@@ -64,3 +66,16 @@ def test_empty_parse() -> None:
     assert parse_allowed_topics(None) == []
     assert parse_allowed_topics("  ") == []
     assert resolve_allowed_topics(None) == [CORE_ALLOWED_TOPIC]
+
+
+def test_prompt_mode_regs_only_vs_legal() -> None:
+    assert resolve_prompt_mode(None) == "regs_only"
+    assert resolve_prompt_mode(resolve_allowed_topics(None)) == "regs_only"
+    assert not includes_legal_topics(resolve_allowed_topics("Брендбук=логотип"))
+
+    legal = resolve_allowed_topics(
+        "Конституция РФ=основной закон;Трудовой кодекс РФ"
+    )
+    assert includes_legal_topics(legal)
+    assert resolve_prompt_mode(legal) == "regs_legal"
+    assert includes_legal_topics(resolve_allowed_topics("ТК РФ=нормы труда"))

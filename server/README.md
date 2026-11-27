@@ -93,6 +93,12 @@ Corporate regulations are always in-domain. To also answer from other ingested
 corpora (e.g. Конституция РФ, Трудовой кодекс РФ), set `ALLOWED_TOPICS` in
 `.env` (labels / optional descriptions; see `.env.example`). That list feeds the
 off-topic heuristic, LLM classify prompt, refusal text, and answer prompts.
+
+Answer prompts are composed in two modes driven by the same setting:
+- **regs-only** (default): corporate regs + learned expert answers; no ТК/Конституция wording.
+- **regs+legal**: when `ALLOWED_TOPICS` includes Конституция РФ and/or Трудовой кодекс РФ,
+  a shared base prompt plus a legal addendum is used.
+
 Weather/time/jokes stay refused. Ingest the matching files into Qdrant first.
 
 ### 6. Tests

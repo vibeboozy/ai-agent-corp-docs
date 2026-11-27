@@ -27,6 +27,7 @@ from app.application.text_util import strip_think_blocks
 from app.domain.allowed_topics import (
     AllowedTopic,
     format_topics_for_prompt,
+    includes_legal_topics,
     resolve_allowed_topics,
 )
 from app.domain.errors import AppError, UpstreamTimeoutError
@@ -162,6 +163,12 @@ class HttpLLMClient:
     ) -> str:
         hist = "\n".join(history or [])
         topics_block = format_topics_for_prompt(self._allowed_topics)
+        legal_note = ""
+        if includes_legal_topics(self._allowed_topics):
+            legal_note = (
+                " Questions about listed legal corpora "
+                "(Конституция РФ / Трудовой кодекс РФ) are in-domain, not off_topic."
+            )
         prompt = (
             "Classify the user question as one of: "
             "underspecified, ambiguous, specific, off_topic.\n"
@@ -170,12 +177,12 @@ class HttpLLMClient:
             "Rules:\n"
             "- off_topic: chitchat or asks outside the in-domain topics above "
             "(e.g. сколько времени, какая погода, расскажи анекдот). "
-            "Do NOT label as off_topic questions about any listed in-domain topic "
-            "(including Конституция РФ / Трудовой кодекс РФ when configured).\n"
+            "Do NOT label as off_topic questions about any listed in-domain topic."
+            f"{legal_note}\n"
             "- specific: asks who/what for a concrete role+topic "
             "(e.g. кто отвечает за организацию отчётности по проекту, "
             "кто подписывает договоры на закупку) OR a concrete ask about an "
-            "in-domain legal/regulatory document that was ingested. Prefer specific "
+            "in-domain document/corpus that was ingested. Prefer specific "
             "when both a role-seeking cue and a concrete topic are present.\n"
             "- ambiguous: could map to two+ distinct regulation scopes "
             "(e.g. кто подписывает договоры — закупка vs подряд).\n"
