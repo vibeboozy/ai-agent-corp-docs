@@ -65,3 +65,13 @@ def test_expand_for_display_disabled_when_both_flags_off() -> None:
     msg = "Назначается РП."
     assert g.expand_for_display(msg) == msg
 
+
+def test_uppercase_abbr_does_not_match_lowercase_preposition() -> None:
+    """ПО must not expand the Russian preposition «по»."""
+    g = AbbreviationGlossary.from_defaults()
+    text = "задачи сотрудникам субподрядчика по электронной почте"
+    assert "Программное обеспечение" not in g.expand_for_display(text)
+    assert "Программное обеспечение" not in g.expand(text)
+    assert g.find_matches(text) == {}
+    assert "ПО" in g.find_matches("внедрение ПО")
+

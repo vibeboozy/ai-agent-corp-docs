@@ -63,26 +63,33 @@ _HANGING_TAIL_RE = re.compile(
     r"(?i)(?:\b(?:от|для|по|на|с|из|и|или|кроме|при|без|через|под|над|между|а|но|что|как|в)\b"
     r"|[,:;–—\-]|…|\.\.\.)$"
 )
-# WHO / WHAT / WHEN extractors over a regulation clause (paraphrase source).
-_WHO_EXTRACT_RES = (
-    re.compile(
-        r"(?is)заключа(?:ются|ется)\s+от\s+(.+?)(?:\.|$)",
-    ),
-    re.compile(
-        r"(?is)подписыва(?:ют|ет)\s+(.+?)(?:\.|$)",
-    ),
+# WHO active verbs with both sides (Russian may be SVO or OVS).
+_WHO_ACTIVE_BOTH_RE = re.compile(
+    r"(?is)([^\n.]+?)\s+"
+    r"(назначает|ведёт|подписывает|утверждает|согласовывает)\s+"
+    r"([^\n.]+?)(?:\.|$)"
+)
+# WHO: agent AFTER (отвечает Y / заключаются от Y / подписывают Y)
+_WHO_AGENT_AFTER_RES = (
     re.compile(
         r"(?is)отвечает\s+(.+?)(?:\.|$)",
     ),
     re.compile(
-        r"(?is)назначает\s+(.+?)(?:\.|$)",
+        r"(?is)заключа(?:ются|ется)\s+от\s+(.+?)(?:\.|$)",
     ),
     re.compile(
-        r"(?is)ведёт\s+(.+?)(?:\.|$)",
+        r"(?is)подписывают\s+(.+?)(?:\.|$)",
     ),
     re.compile(
         r"(?is)является\s+(.+?)(?:\.|$)",
     ),
+)
+_ROLE_LIKE_RE = re.compile(
+    r"(?i)^(?:"
+    r"[A-ZА-ЯЁ]{2,6}"
+    r"|(?:руководитель|координатор|менеджер|директор|администратор|инженер|уполномоченн|"
+    r"юридическ)"
+    r")"
 )
 _WHEN_EXTRACT_RES = (
     re.compile(
@@ -92,9 +99,15 @@ _WHEN_EXTRACT_RES = (
 _REGULATION_LEAK_RES = (
     re.compile(r"(?i)\bзаключа(?:ются|ется|ть)\b"),
     re.compile(r"(?i)\bподписыва(?:ют|ет|ть)\b"),
+    re.compile(r"(?i)\bназначает\b"),
     re.compile(r"(?i)\bкроме\b"),
     re.compile(r"(?i)\bперепродаж"),
     re.compile(r"(?i)\bсубподряд"),
+    re.compile(r"(?i)\bэлектронной\s+почт"),
+)
+# Object-like dumps mistaken for the WHO answer (verb object, not subject).
+_WHO_OBJECT_NOISE_RE = re.compile(
+    r"(?i)^(задачи|договоры|работы|заявки|документы|отчётность|сроки)\b"
 )
 
 
@@ -167,7 +180,8 @@ def build_paraphrase_repair_prompt(*, question: str, quote: str, bad_answer: str
         f"Bad answer (do not reuse wording): {bad_answer}\n"
         "\n"
         "Rewrite ONLY the Ответ line as one short WHO/WHAT/WHEN paraphrase in Russian. "
-        "Do not copy the quote. Do not truncate mid-clause. "
+        "For WHO questions keep the role/subject (e.g. РП), never the verb object "
+        "(не «задачи сотрудникам…»). Do not copy the quote. Do not truncate mid-clause. "
         "Reply with a single line: Ответ: <paraphrase>"
     )
 
@@ -292,6 +306,9 @@ def _capitalize_phrase(phrase: str) -> str:
         return ""
     # Drop trailing relative clauses that make it sentence-long.
     phrase = re.split(r",\s*(?:кроме|а также|в том числе)\b", phrase, maxsplit=1)[0].strip()
+    # Keep short role abbreviations as-is (РП, АМ, ДИБ).
+    if re.fullmatch(r"[A-ZА-ЯЁ]{1,6}", phrase):
+        return phrase
     for pat, repl in _NOMINATIVE_FIXES:
         if pat.search(phrase):
             phrase = pat.sub(repl, phrase, count=1)
@@ -302,11 +319,42 @@ def _capitalize_phrase(phrase: str) -> str:
     return phrase
 
 
+def _is_who_object_noise(phrase: str) -> bool:
+    """True when extraction captured the verb object instead of the subject."""
+    return bool(_WHO_OBJECT_NOISE_RE.match((phrase or "").strip()))
+
+
+def _format_who_phrase(phrase: str) -> str:
+    phrase = _capitalize_phrase(phrase)
+    if not phrase:
+        return ""
+    if re.fullmatch(r"[A-ZА-ЯЁ]{1,6}", phrase):
+        return phrase
+    if not phrase.endswith((".", "!", "?")):
+        phrase = phrase.rstrip(".") + "."
+    return phrase
+
+
+def _pick_who_side(left: str, right: str) -> str:
+    """Choose role/subject side for active verbs (SVO vs OVS)."""
+    candidates = [_capitalize_phrase(left), _capitalize_phrase(right)]
+    # Prefer role-like side that is not object noise.
+    for cand in candidates:
+        if cand and _ROLE_LIKE_RE.match(cand) and not _is_who_object_noise(cand):
+            return _format_who_phrase(cand)
+    for cand in candidates:
+        if cand and not _is_who_object_noise(cand) and not is_incomplete_answer(cand):
+            if len(tokenize(cand)) <= 6:
+                return _format_who_phrase(cand)
+    return ""
+
+
 def extract_short_paraphrase(query: str, passage: str) -> str:
     """
     Derive a short WHO/WHAT/WHEN paraphrase from the supporting passage.
 
     Used when the model dumps regulation text or truncates mid-clause.
+    For WHO questions keep the role/subject (e.g. «РП»), never the verb object.
     """
     passage = strip_regulation_noise(cut_before_next_clause(passage or ""))
     if not passage:
@@ -315,28 +363,59 @@ def extract_short_paraphrase(query: str, passage: str) -> str:
     who_ask = bool(re.search(r"\bкто\b", q))
     when_ask = bool(re.search(r"\b(срок|когда|в\s+какой\s+срок|как\s+быстро)\b", q))
 
-    patterns = []
-    if when_ask:
-        patterns.extend(_WHEN_EXTRACT_RES)
-    if who_ask or not patterns:
-        patterns.extend(_WHO_EXTRACT_RES)
-    if not when_ask:
-        patterns.extend(_WHEN_EXTRACT_RES)
+    def _try_agent_after() -> str:
+        for pat in _WHO_AGENT_AFTER_RES:
+            m = pat.search(passage)
+            if not m:
+                continue
+            phrase = _capitalize_phrase(m.group(1))
+            if (
+                phrase
+                and not _is_who_object_noise(phrase)
+                and not is_incomplete_answer(phrase)
+                and not (
+                    looks_like_regulation_copy(phrase, passage)
+                    and len(tokenize(phrase)) > 4
+                )
+            ):
+                if len(tokenize(phrase)) <= _MAX_ANSWER_WORDS and len(phrase) <= _MAX_ANSWER_CHARS:
+                    return _format_who_phrase(phrase)
+        return ""
 
-    for pat in patterns:
-        m = pat.search(passage)
-        if not m:
-            continue
-        phrase = _capitalize_phrase(m.group(1))
-        if not phrase or is_incomplete_answer(phrase):
-            continue
-        if looks_like_regulation_copy(phrase, passage) and len(tokenize(phrase)) > 8:
-            continue
-        # Prefer compact agent phrases.
-        if len(tokenize(phrase)) <= _MAX_ANSWER_WORDS and len(phrase) <= _MAX_ANSWER_CHARS:
-            if not phrase.endswith((".", "!", "?")):
-                phrase = phrase.rstrip(".") + "."
-            return phrase
+    def _try_active_both() -> str:
+        both = _WHO_ACTIVE_BOTH_RE.search(passage)
+        if not both:
+            return ""
+        return _pick_who_side(both.group(1), both.group(3))
+
+    def _try_when() -> str:
+        for pat in _WHEN_EXTRACT_RES:
+            m = pat.search(passage)
+            if not m:
+                continue
+            phrase = _capitalize_phrase(m.group(1))
+            if not phrase or is_incomplete_answer(phrase):
+                continue
+            if looks_like_regulation_copy(phrase, passage) and len(tokenize(phrase)) > 4:
+                continue
+            if len(tokenize(phrase)) <= _MAX_ANSWER_WORDS and len(phrase) <= _MAX_ANSWER_CHARS:
+                return _format_who_phrase(phrase)
+        return ""
+
+    # Query only prioritizes order; always fall back across WHO/WHEN extractors so
+    # clarify follow-ups ("Это про отчётность…") still get a role paraphrase.
+    ordered: list = []
+    if when_ask:
+        ordered.extend([_try_when, _try_agent_after, _try_active_both])
+    elif who_ask:
+        ordered.extend([_try_active_both, _try_agent_after, _try_when])
+    else:
+        ordered.extend([_try_active_both, _try_agent_after, _try_when])
+
+    for attempt in ordered:
+        got = attempt()
+        if got:
+            return got
     return ""
 
 
