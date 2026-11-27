@@ -1,6 +1,6 @@
 """
 ANCHOR: app.cli
-PURPOSE: CLI entrypoints — connectivity `check`, docx ingest helper.
+PURPOSE: CLI entrypoints — connectivity `check`, Docling file ingest helper.
 Dependencies: app.config.factories, connectivity service, ingest
 DO:
 - Print per-dependency ok/fail without secrets
@@ -15,6 +15,9 @@ import argparse
 import asyncio
 import sys
 from pathlib import Path
+
+# Primary subcommand: ingest-file. Cheap aliases for older/shorter names.
+_INGEST_COMMANDS = frozenset({"ingest-file", "ingest", "ingest-docx"})
 
 
 def _print_report(report: dict) -> int:
@@ -38,8 +41,8 @@ async def _run_check() -> int:
     return _print_report(report)
 
 
-async def _run_ingest_docx(path: str, *, document_title: str | None) -> int:
-    """Convert a local .docx via Docling (base64 FileSource) and upsert chunks."""
+async def _run_ingest(path: str, *, document_title: str | None) -> int:
+    """Convert a local Docling-supported file (docx/pdf/…) and upsert chunks."""
     from app.config.factories import build_container
     from app.config.settings import clear_settings_cache, get_settings
 
@@ -109,17 +112,24 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("check", help="Probe LLM/embeddings/Qdrant/Docling/Postgres")
 
     ingest_p = sub.add_parser(
-        "ingest-docx",
-        help="Ingest a local .docx via Docling Serve /v1/convert/source (base64 FileSource)",
+        "ingest-file",
+        aliases=["ingest", "ingest-docx"],
+        help=(
+            "Ingest a local Docling-supported file (docx/pdf/…) via "
+            "Docling Serve /v1/convert/source (base64 FileSource)"
+        ),
     )
-    ingest_p.add_argument("path", help="Path to .docx (or other Docling-supported file)")
+    ingest_p.add_argument(
+        "path",
+        help="Path to a Docling-supported file (.docx, .pdf, …)",
+    )
     ingest_p.add_argument("--title", default=None, help="Document title override")
 
     args = parser.parse_args(argv)
     if args.command == "check":
         return asyncio.run(_run_check())
-    if args.command == "ingest-docx":
-        return asyncio.run(_run_ingest_docx(args.path, document_title=args.title))
+    if args.command in _INGEST_COMMANDS:
+        return asyncio.run(_run_ingest(args.path, document_title=args.title))
     parser.error(f"unknown command: {args.command}")
     return 2
 
