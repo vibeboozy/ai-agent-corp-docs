@@ -139,7 +139,7 @@ API (FastAPI routers)
 | `dialogue` | LangGraph: clarify vs answer vs escalate |
 | `grounding` | Citation check; refuse unsupported claims |
 | `retrieval` | Hybrid dense+sparse, RRF, optional LLM rerank |
-| `ingest` | docx → Docling → chunks → embed → Qdrant |
+| `ingest` | file (docx/pdf/…) → Docling → chunks → embed → Qdrant |
 | `learning` | Officer canonical answer → KB update |
 | `quality_escalation` | Ticket + email to quality service |
 | `persistence` | PostgreSQL: appeals, messages, escalations, audit, stats inputs |

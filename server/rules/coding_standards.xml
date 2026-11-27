@@ -11,8 +11,10 @@
       Cross-cutting logging may live under server/app/logging/ or shared utils.
     </rule>
     <rule id="CS-LAYOUT-03">
-      RAG corpus docx files are local-only under the path from DOCS_CORPUS_PATH (default server/docs/) or DOCS_DIR;
-      the corpus directory is gitignored and must not be committed. Rules/context live under server/ and server/rules/ — not at repo root.
+      RAG corpus files (docx/pdf/… via `rag-server ingest-file`; aliases `ingest`, `ingest-docx`) are
+      local-only under the path from DOCS_CORPUS_PATH (default server/docs/) or DOCS_DIR; the corpus
+      directory is gitignored and must not be committed. Rules/context live under server/ and
+      server/rules/ — not at repo root.
     </rule>
     <rule id="CS-LAYOUT-04">
       Tests under server/tests/ mirroring app packages (tests/api, tests/application, tests/adapters, tests/integration).

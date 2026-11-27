@@ -19,7 +19,7 @@ Connectivity: `rag-server check` (or `python -m app.cli check`) — expect `over
 
 **Qdrant:** collection uses named vectors `dense` + `sparse` (hybrid RRF). On first
 upsert/search the server recreates a collection that still has unnamed Default 1024.
-Re-ingest corpus after schema recreate: `rag-server ingest-docx …`.
+Re-ingest corpus after schema recreate: `rag-server ingest-file …`.
 
 ## 1. Grounded answer
 

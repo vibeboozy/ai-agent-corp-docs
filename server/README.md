@@ -69,11 +69,11 @@ python3 -m app.cli check
 
 Prints `overall` plus lines for `llm`, `embeddings`, `qdrant`, `docling`, `postgres`. Exit `0` when all OK.
 
-Optional Docling file ingest:
+Optional Docling file ingest (docx/pdf/…; aliases: `ingest`, `ingest-docx`):
 
 ```bash
-rag-server ingest-docx /path/to/reg.docx --title "Procurement"
-# or: python3 -m app.cli ingest-docx /path/to/reg.docx
+rag-server ingest-file /path/to/reg.docx --title "Procurement"
+# or: python3 -m app.cli ingest-file /path/to/reg.pdf
 ```
 
 ### 5. Abbreviation glossary
