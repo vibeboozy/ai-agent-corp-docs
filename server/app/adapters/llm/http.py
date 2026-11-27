@@ -26,9 +26,11 @@ from app.adapters.llm.port import LLMClient
 from app.application.text_util import strip_think_blocks
 from app.domain.allowed_topics import (
     AllowedTopic,
+    DomainMode,
     format_topics_for_prompt,
-    includes_legal_topics,
-    resolve_allowed_topics,
+    is_legal_mode,
+    resolve_prompt_mode,
+    topics_for_mode,
 )
 from app.domain.errors import AppError, UpstreamTimeoutError
 
@@ -82,6 +84,7 @@ class HttpLLMClient:
         max_tokens: int = 1500,
         reasoning_tokens: int = 0,
         allow_hosts: set[str] | None = None,
+        domain_mode: DomainMode | str | None = None,
         allowed_topics: list[AllowedTopic] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
@@ -92,7 +95,12 @@ class HttpLLMClient:
         self._max_tokens = max_tokens
         self._reasoning_tokens = max(0, int(reasoning_tokens))
         self._allow_hosts = allow_hosts or set()
-        self._allowed_topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
+        self._domain_mode: DomainMode = resolve_prompt_mode(domain_mode)
+        self._allowed_topics = (
+            list(allowed_topics)
+            if allowed_topics is not None
+            else topics_for_mode(self._domain_mode)
+        )
         self._assert_host_allowed()
 
     @property
@@ -164,7 +172,7 @@ class HttpLLMClient:
         hist = "\n".join(history or [])
         topics_block = format_topics_for_prompt(self._allowed_topics)
         legal_note = ""
-        if includes_legal_topics(self._allowed_topics):
+        if is_legal_mode(self._domain_mode):
             legal_note = (
                 " Questions about listed legal corpora "
                 "(Конституция РФ / Трудовой кодекс РФ) are in-domain, not off_topic."

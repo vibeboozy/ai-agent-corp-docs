@@ -8,6 +8,7 @@ DO:
 - Источник = document title + п. N only (never a full sentence)
 - Expand known abbreviations in Ответ when glossary active
 - Compose answer system prompt: shared regs base + optional legal addendum
+  driven by DIALOGUE_DOMAIN_MODE (regs_only | regs_legal)
 DONT:
 - Copy regulation wording into Ответ
 - Truncate mid-clause with ellipsis as the user-facing answer
@@ -29,9 +30,11 @@ from app.application.text_util import (
 )
 from app.domain.allowed_topics import (
     AllowedTopic,
+    DomainMode,
     format_topics_for_prompt,
-    includes_legal_topics,
+    is_legal_mode,
     resolve_prompt_mode,
+    topics_for_mode,
 )
 
 if TYPE_CHECKING:
@@ -209,10 +212,10 @@ def _answer_prompt_base(*, topics_block: str) -> str:
 
 
 def _answer_prompt_legal_addendum() -> str:
-    """Optional block when ALLOWED_TOPICS includes Конституция РФ / ТК РФ."""
+    """Optional block when DIALOGUE_DOMAIN_MODE=regs_legal."""
     return (
         "\n"
-        "=== Дополнение: законодательство РФ (режим regs+legal) ===\n"
+        "=== Дополнение: законодательство РФ (режим regs_legal) ===\n"
         "Дополнительная специализация: Трудовой кодекс РФ и Конституция РФ "
         "(только если соответствующие passages присутствуют).\n"
         "\n"
@@ -244,40 +247,38 @@ def build_answer_system_prompt(
     topics_block: str | None = None,
     *,
     topics: Sequence[AllowedTopic] | None = None,
+    domain_mode: DomainMode | str | None = None,
     include_legal: bool | None = None,
 ) -> str:
     """
     RCTIOSE-adapted system prompt composed from shared base + optional legal addendum.
 
-    Mode:
+    Mode (DIALOGUE_DOMAIN_MODE):
     - regs_only: corporate regs + learned; no ТК/Конституция wording
-    - regs_legal: when ALLOWED_TOPICS includes those corpora (or include_legal=True)
+    - regs_legal: base + legal addendum; topics bake Конституция РФ + ТК РФ
 
     Retrieval already ran; no fake tools; clarify/escalate live in the graph.
     """
-    topic_list = list(topics) if topics is not None else None
-    block = (topics_block or "").strip()
-    if not block:
-        block = format_topics_for_prompt(topic_list)
-    if include_legal is None:
-        legal = includes_legal_topics(topic_list) if topic_list is not None else False
-    else:
-        legal = bool(include_legal)
+    mode = resolve_prompt_mode(domain_mode)
+    if include_legal is not None:
+        mode = "regs_legal" if include_legal else "regs_only"
+    topic_list = list(topics) if topics is not None else topics_for_mode(mode)
+    block = (topics_block or "").strip() or format_topics_for_prompt(topic_list)
     prompt = _answer_prompt_base(topics_block=block)
-    if legal:
+    if is_legal_mode(mode):
         prompt = prompt + _answer_prompt_legal_addendum()
     return prompt
 
 
 def answer_prompt_mode(
-    topics: Sequence[AllowedTopic] | None = None,
+    domain_mode: DomainMode | str | None = None,
     *,
     include_legal: bool | None = None,
 ) -> str:
     """Expose regs_only | regs_legal for tests / audit."""
     if include_legal is not None:
         return "regs_legal" if include_legal else "regs_only"
-    return resolve_prompt_mode(list(topics) if topics is not None else None)
+    return resolve_prompt_mode(domain_mode)
 
 
 def build_answer_user_prompt(*, question: str, passages: list[str]) -> str:

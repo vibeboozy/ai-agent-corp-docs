@@ -87,19 +87,16 @@ search and, on ingest, append expansions into chunk **text** (e.g.
 (`ABBREVIATION_GLOSSARY`, `ABBREVIATION_GLOSSARY_PATH`,
 `ABBREVIATION_EXPAND_QUERY`, `ABBREVIATION_ENRICH_INGEST`).
 
-### 5b. Allowed topics (domain gate)
+### 5b. Domain mode (gate + prompts)
 
-Corporate regulations are always in-domain. To also answer from other ingested
-corpora (e.g. Конституция РФ, Трудовой кодекс РФ), set `ALLOWED_TOPICS` in
-`.env` (labels / optional descriptions; see `.env.example`). That list feeds the
-off-topic heuristic, LLM classify prompt, refusal text, and answer prompts.
+Set `DIALOGUE_DOMAIN_MODE` in `.env` (see `.env.example`):
 
-Answer prompts are composed in two modes driven by the same setting:
-- **regs-only** (default): corporate regs + learned expert answers; no ТК/Конституция wording.
-- **regs+legal**: when `ALLOWED_TOPICS` includes Конституция РФ and/or Трудовой кодекс РФ,
-  a shared base prompt plus a legal addendum is used.
+- **`regs_only`** (default): corporate regs + learned expert answers; no ТК/Конституция wording.
+- **`regs_legal`**: shared base prompt + legal addendum; bakes Конституция РФ and
+  Трудовой кодекс РФ into the in-domain topic list for gate / classify / refuse.
 
-Weather/time/jokes stay refused. Ingest the matching files into Qdrant first.
+Weather/time/jokes stay refused in both modes. Ingest matching legal docs into Qdrant
+before enabling `regs_legal`.
 
 ### 6. Tests
 

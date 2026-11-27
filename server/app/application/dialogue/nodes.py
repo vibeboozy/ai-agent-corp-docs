@@ -38,9 +38,10 @@ from app.application.retrieval.service import RetrievalService
 from app.application.text_util import strip_think_blocks
 from app.domain.allowed_topics import (
     AllowedTopic,
+    DomainMode,
     build_refusal_message,
     format_topics_for_prompt,
-    resolve_allowed_topics,
+    topics_for_mode,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +53,8 @@ class DialogueDeps:
     retrieval: RetrievalService
     grounding: GroundingService
     quality_email: str
-    allowed_topics: list[AllowedTopic] = field(default_factory=resolve_allowed_topics)
+    domain_mode: DomainMode = "regs_only"
+    allowed_topics: list[AllowedTopic] = field(default_factory=lambda: topics_for_mode("regs_only"))
 
 
 def _trace(state: DialogueState, node: str) -> list[str]:
@@ -210,9 +212,11 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
                     f"[{idx}] ({loc}) {c.get('text')}"
                 )
             t0 = time.perf_counter()
-            allowed = list(deps.allowed_topics)
             draft = await deps.llm.complete(
-                system=build_answer_system_prompt(topics=allowed),
+                system=build_answer_system_prompt(
+                    topics=list(deps.allowed_topics),
+                    domain_mode=deps.domain_mode,
+                ),
                 user=build_answer_user_prompt(
                     question=user_message, passages=passages
                 ),
@@ -239,7 +243,10 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             bad = final_body or extract_answer_body(draft or "") or (draft or "")[:240]
             t1 = time.perf_counter()
             repaired = await deps.llm.complete(
-                system=build_answer_system_prompt(topics=list(deps.allowed_topics)),
+                system=build_answer_system_prompt(
+                    topics=list(deps.allowed_topics),
+                    domain_mode=deps.domain_mode,
+                ),
                 user=build_paraphrase_repair_prompt(
                     question=user_message,
                     quote=quote,

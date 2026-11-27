@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.application.test_offtopic_refuse
-PURPOSE: Off-topic chitchat → refuse; regs + ALLOWED_TOPICS still retrieve.
+PURPOSE: Off-topic chitchat → refuse; regs_legal baked topics still retrieve.
 Dependencies: dialogue.offtopic / graph routing / make_nodes / allowed_topics
 """
 
@@ -20,7 +20,7 @@ from app.application.dialogue.offtopic import (
 )
 from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
-from app.domain.allowed_topics import resolve_allowed_topics
+from app.domain.allowed_topics import topics_for_mode
 
 
 def test_is_off_topic_time_and_weather() -> None:
@@ -30,10 +30,8 @@ def test_is_off_topic_time_and_weather() -> None:
     assert not is_off_topic("Сколько времени отводится на согласование договора?")
 
 
-def test_allowed_topics_allow_constitution_refuse_weather() -> None:
-    topics = resolve_allowed_topics(
-        "Конституция РФ=основной закон РФ;Трудовой кодекс РФ"
-    )
+def test_regs_legal_allows_constitution_refuse_weather() -> None:
+    topics = topics_for_mode("regs_legal")
     assert is_supported_domain("Что говорит Конституция РФ о правах?", topics)
     assert not is_off_topic(
         "Что говорит Конституция РФ о правах?", allowed_topics=topics
@@ -41,7 +39,7 @@ def test_allowed_topics_allow_constitution_refuse_weather() -> None:
     assert not is_off_topic(
         "Какой срок предупреждения по Трудовому кодексу РФ?", allowed_topics=topics
     )
-    # Weather / time stay refused even with extras configured.
+    # Weather / time stay refused even in regs_legal.
     assert is_off_topic("Какая погода?", allowed_topics=topics)
     assert is_off_topic("Сколько времени?", allowed_topics=topics)
     assert not is_supported_domain("Какая погода?", topics)
@@ -67,6 +65,7 @@ async def test_graph_refuses_off_topic_without_retrieve() -> None:
         retrieval=RetrievalService(embeddings=embeddings, vectorstore=vectorstore),
         grounding=GroundingService(),
         quality_email="q@example.invalid",
+        domain_mode="regs_only",
     )
     graph = build_dialogue_graph(deps)
     out = await graph.ainvoke(
@@ -85,9 +84,9 @@ async def test_graph_refuses_off_topic_without_retrieve() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_allows_configured_topic_and_retrieves() -> None:
-    """ALLOWED_TOPICS question must pass the retrieve gate (not refuse)."""
-    topics = resolve_allowed_topics("Конституция РФ")
+async def test_graph_allows_regs_legal_topic_and_retrieves() -> None:
+    """regs_legal baked topic must pass the retrieve gate (not refuse)."""
+    topics = topics_for_mode("regs_legal")
     embeddings = AsyncMock()
     embeddings.embed_dense = AsyncMock(return_value=[[0.1]])
     embeddings.embed_sparse = AsyncMock(return_value=[{"q": 1.0}])
@@ -115,6 +114,7 @@ async def test_graph_allows_configured_topic_and_retrieves() -> None:
         retrieval=RetrievalService(embeddings=embeddings, vectorstore=vectorstore),
         grounding=GroundingService(),
         quality_email="q@example.invalid",
+        domain_mode="regs_legal",
         allowed_topics=topics,
     )
     graph = build_dialogue_graph(deps)
@@ -134,8 +134,8 @@ async def test_graph_allows_configured_topic_and_retrieves() -> None:
 
 
 @pytest.mark.asyncio
-async def test_refuse_message_includes_configured_topics() -> None:
-    topics = resolve_allowed_topics("Конституция РФ;Трудовой кодекс РФ")
+async def test_refuse_message_includes_baked_legal_topics() -> None:
+    topics = topics_for_mode("regs_legal")
     deps = DialogueDeps(
         llm=AsyncMock(),
         retrieval=RetrievalService(
@@ -144,6 +144,7 @@ async def test_refuse_message_includes_configured_topics() -> None:
         ),
         grounding=GroundingService(),
         quality_email="q@example.invalid",
+        domain_mode="regs_legal",
         allowed_topics=topics,
     )
     nodes = make_nodes(deps)
@@ -173,8 +174,8 @@ async def test_assess_node_marks_off_topic() -> None:
 
 
 @pytest.mark.asyncio
-async def test_assess_overrides_llm_off_topic_for_allowed_topic() -> None:
-    topics = resolve_allowed_topics("Трудовой кодекс РФ")
+async def test_assess_overrides_llm_off_topic_for_legal_topic() -> None:
+    topics = topics_for_mode("regs_legal")
     llm = AsyncMock()
     llm.classify_specificity = AsyncMock(return_value="off_topic")
     deps = DialogueDeps(
@@ -185,6 +186,7 @@ async def test_assess_overrides_llm_off_topic_for_allowed_topic() -> None:
         ),
         grounding=GroundingService(),
         quality_email="q@example.invalid",
+        domain_mode="regs_legal",
         allowed_topics=topics,
     )
     nodes = make_nodes(deps)
