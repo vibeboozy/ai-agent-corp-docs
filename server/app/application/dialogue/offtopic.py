@@ -1,17 +1,27 @@
 """
 ANCHOR: app.application.dialogue.offtopic
-PURPOSE: Detect off-topic chitchat; refuse politely (regulation Q&A only).
-Dependencies: re, unicodedata
+PURPOSE: Detect off-topic chitchat; refuse politely (in-domain topics only).
+Dependencies: re, unicodedata; domain.allowed_topics
 DO:
-- Catch clear non-regulation asks (time, weather, jokes, identity)
+- Catch clear non-domain asks (time, weather, jokes, identity)
+- Treat configured ALLOWED_TOPICS cues as in-domain (not heuristic refuse)
 DONT:
-- Refuse regulation process questions that happen to mention time/weather as context
+- Refuse regulation / allowed-topic questions that mention time/weather as context
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Sequence
+
+from app.domain.allowed_topics import (
+    AllowedTopic,
+    CORE_ALLOWED_TOPIC,
+    build_refusal_message,
+    mentions_allowed_topic,
+    resolve_allowed_topics,
+)
 
 # Standalone chitchat / unsupported asks (whole-message or dominant intent).
 _OFF_TOPIC_RE = re.compile(
@@ -33,7 +43,7 @@ _OFF_TOPIC_RE = re.compile(
     r")\s*[?.!]?\s*$"
 )
 
-# Soft cues that still look like regulation when combined with process nouns —
+# Soft cues that still look like corporate regulation when combined with process nouns —
 # used only to *avoid* false positives, not to detect off-topic alone.
 _REGULATION_CUE_RE = re.compile(
     r"(?iu)\b(?:"
@@ -42,11 +52,8 @@ _REGULATION_CUE_RE = re.compile(
     r")\b"
 )
 
-OFF_TOPIC_REFUSAL_RU = (
-    "Этот вопрос не поддерживается. Я отвечаю только на вопросы по "
-    "корпоративным регламентам и процессам. Переформулируйте запрос "
-    "в терминах регламента (роль, процесс, документ)."
-)
+# Default refusal (corporate-only); prefer build_refusal_message(allowed_topics) at runtime.
+OFF_TOPIC_REFUSAL_RU = build_refusal_message([CORE_ALLOWED_TOPIC])
 
 
 def _normalize(text: str) -> str:
@@ -54,17 +61,39 @@ def _normalize(text: str) -> str:
     return folded.replace("ё", "е").replace("Ё", "Е").strip()
 
 
-def is_off_topic(user_message: str, history: list[str] | None = None) -> bool:
+def is_supported_domain(
+    user_message: str,
+    allowed_topics: Sequence[AllowedTopic] | None = None,
+) -> bool:
+    """True when the message cues corporate regs or a configured allowed topic."""
+    msg = _normalize(user_message)
+    if not msg:
+        return False
+    if _REGULATION_CUE_RE.search(msg):
+        return True
+    topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
+    return mentions_allowed_topic(msg, list(topics))
+
+
+def is_off_topic(
+    user_message: str,
+    history: list[str] | None = None,
+    *,
+    allowed_topics: Sequence[AllowedTopic] | None = None,
+) -> bool:
     """
     True when the turn is unsupported chitchat (e.g. «Сколько времени»).
 
     History is ignored for detection — off-topic is judged on the current message.
-    Messages that clearly name a regulation process are never refused here.
+    Messages that clearly name a regulation process or allowed topic are never refused here.
+    Clear chitchat patterns (weather/time/jokes) stay refused even if ALLOWED_TOPICS is set.
     """
     _ = history
     msg = _normalize(user_message)
     if not msg:
         return False
-    if _REGULATION_CUE_RE.search(msg):
+    # In-domain cues win over bare chitchat patterns (e.g. time windows in processes).
+    if is_supported_domain(msg, allowed_topics=allowed_topics):
         return False
+    # Explicit chitchat → refuse before retrieve (retrieval gate).
     return bool(_OFF_TOPIC_RE.match(msg))

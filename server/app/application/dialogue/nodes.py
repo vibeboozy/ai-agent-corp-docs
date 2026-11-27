@@ -15,16 +15,26 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.adapters.llm.port import LLMClient
-from app.application.dialogue.offtopic import OFF_TOPIC_REFUSAL_RU, is_off_topic
+from app.application.dialogue.offtopic import (
+    OFF_TOPIC_REFUSAL_RU,
+    is_off_topic,
+    is_supported_domain,
+)
 from app.application.dialogue.specificity import prefer_specific_label
 from app.application.dialogue.state import DialogueState
 from app.application.grounding.service import GroundingService
 from app.application.retrieval.service import RetrievalService
 from app.application.text_util import strip_think_blocks
+from app.domain.allowed_topics import (
+    AllowedTopic,
+    build_refusal_message,
+    format_topics_for_prompt,
+    resolve_allowed_topics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +45,7 @@ class DialogueDeps:
     retrieval: RetrievalService
     grounding: GroundingService
     quality_email: str
+    allowed_topics: list[AllowedTopic] = field(default_factory=resolve_allowed_topics)
 
 
 def _trace(state: DialogueState, node: str) -> list[str]:
@@ -55,7 +66,8 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         t0 = time.perf_counter()
         user_message = state.get("user_message", "") or ""
         history = list(state.get("history") or [])
-        if is_off_topic(user_message, history):
+        topics = list(deps.allowed_topics)
+        if is_off_topic(user_message, history, allowed_topics=topics):
             assess_ms = round((time.perf_counter() - t0) * 1000, 2)
             logger.info("classify_specificity off_topic message=%r", user_message[:200])
             return {
@@ -67,12 +79,15 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             }
         raw_label = await deps.llm.classify_specificity(user_message, history=history)
         raw_norm = str(raw_label or "").strip().lower()
-        # Conservative: role+topic questions must retrieve/answer (not clarify), even when
-        # the LLM timidly returns underspecified/ambiguous.
-        if raw_norm == "off_topic" and prefer_specific_label(
-            "underspecified", user_message, history
-        ) != "specific":
-            label = "off_topic"
+        # Conservative: role+topic / allowed-topic questions must retrieve (not refuse),
+        # even when the LLM timidly returns underspecified/ambiguous/off_topic.
+        if raw_norm == "off_topic":
+            if is_supported_domain(user_message, allowed_topics=topics):
+                label = prefer_specific_label("specific", user_message, history)
+            elif prefer_specific_label("underspecified", user_message, history) == "specific":
+                label = "specific"
+            else:
+                label = "off_topic"
         else:
             label = prefer_specific_label(raw_label, user_message, history)
         assess_ms = round((time.perf_counter() - t0) * 1000, 2)
@@ -92,11 +107,12 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         }
 
     async def refuse(state: DialogueState) -> DialogueState:
+        refusal = build_refusal_message(list(deps.allowed_topics)) or OFF_TOPIC_REFUSAL_RU
         return {
             **state,
             "outcome": "refuse",
-            "clarification_text": OFF_TOPIC_REFUSAL_RU,
-            "draft_answer": OFF_TOPIC_REFUSAL_RU,
+            "clarification_text": refusal,
+            "draft_answer": refusal,
             "node_trace": _trace(state, "refuse:off_topic"),
         }
 
@@ -128,9 +144,11 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
         hist = "\n".join(list(state.get("history") or [])[-4:])
         user_message = state.get("user_message") or ""
         t0 = time.perf_counter()
+        topics_block = format_topics_for_prompt(list(deps.allowed_topics))
         text = await deps.llm.complete(
             system=(
-                "You are a corporate regulations assistant. "
+                "You are a grounded assistant for these in-domain topics:\n"
+                f"{topics_block}\n"
                 "Reply with ONLY the clarifying question in Russian — no preamble."
             ),
             user=(
@@ -185,9 +203,11 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
                     f"[{idx}] ({loc}) {c.get('text')}"
                 )
             t0 = time.perf_counter()
+            topics_block = format_topics_for_prompt(list(deps.allowed_topics))
             draft = await deps.llm.complete(
                 system=(
-                    "You are a corporate regulations assistant. "
+                    "You are a grounded assistant for these in-domain topics:\n"
+                    f"{topics_block}\n"
                     "Answer ONLY from the provided passages in Russian. "
                     "Write complete sentences (no mid-thought truncation). "
                     "If passages do not support an answer, reply with UNSUPPORTED."
