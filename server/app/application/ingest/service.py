@@ -4,12 +4,15 @@ PURPOSE: Ingest text/docs into vectorstore via Docling + embeddings.
 Dependencies: docling, libreoffice, embeddings, vectorstore, persistence
 DO:
 - Update document/chunk metadata in persistence
+- On Docling failure for short officer text, chunk locally then embed→Qdrant
 DONT:
+- Require Docling for the learn / ingest_text path
 - Skip provenance for learned officer text
 """
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +21,13 @@ from app.adapters.embeddings.port import EmbeddingsClient
 from app.adapters.persistence.port import Persistence
 from app.adapters.vectorstore.port import VectorStore
 from app.domain.glossary import AbbreviationGlossary
+
+logger = logging.getLogger(__name__)
+
+
+def _local_text_chunks(*, text: str, job_id: str) -> list[dict[str, Any]]:
+    """Single/simple local chunk for short officer answers when Docling is unavailable."""
+    return [{"chunk_id": f"c-{job_id[:8]}", "text": text}]
 
 
 class IngestService:
@@ -36,6 +46,29 @@ class IngestService:
         self._persistence = persistence
         self._glossary = glossary
 
+    async def _chunks_for_text(self, *, text: str, job_id: str) -> tuple[list[dict[str, Any]], bool]:
+        """
+        Prefer Docling convert; on any failure (or empty chunks) fall back to local chunks.
+
+        Returns (chunks, used_local_fallback).
+        """
+        try:
+            converted = await self._docling.convert(text=text)
+            chunks = list(converted.get("chunks") or [])
+            if chunks:
+                return chunks, False
+            logger.info(
+                "Docling returned no chunks for learn ingest; using local single chunk job_id=%s",
+                job_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Docling convert failed for learn ingest; using local chunks job_id=%s err=%s",
+                job_id,
+                exc,
+            )
+        return _local_text_chunks(text=text, job_id=job_id), True
+
     async def ingest_text(
         self,
         *,
@@ -47,8 +80,7 @@ class IngestService:
     ) -> dict[str, Any]:
         job_id = str(uuid4())
         doc_id = document_id or f"learned-{job_id[:8]}"
-        converted = await self._docling.convert(text=text)
-        raw_chunks = converted.get("chunks") or [{"chunk_id": f"c-{job_id[:8]}", "text": text}]
+        raw_chunks, used_local_fallback = await self._chunks_for_text(text=text, job_id=job_id)
         # Expand abbreviations into chunk TEXT before embed so dense/sparse see them.
         enriched_chunks: list[dict[str, Any]] = []
         for chunk in raw_chunks:
@@ -68,6 +100,8 @@ class IngestService:
                 **(metadata or {}),
                 "ingest_job_id": job_id,
             }
+            if used_local_fallback:
+                meta["chunking"] = "local_fallback"
             if chunk.get("section_title"):
                 meta["section_title"] = chunk["section_title"]
             if self._glossary is not None:
@@ -90,6 +124,16 @@ class IngestService:
         await self._persistence.add_audit_event(
             appeal_id=None,
             event_type="ingest_completed",
-            payload={"ingest_job_id": job_id, "document_id": doc_id, "chunks": len(upserts)},
+            payload={
+                "ingest_job_id": job_id,
+                "document_id": doc_id,
+                "chunks": len(upserts),
+                "chunking": "local_fallback" if used_local_fallback else "docling",
+            },
         )
-        return {"ingest_job_id": job_id, "document_id": doc_id, "chunks": len(upserts)}
+        return {
+            "ingest_job_id": job_id,
+            "document_id": doc_id,
+            "chunks": len(upserts),
+            "chunking": "local_fallback" if used_local_fallback else "docling",
+        }
