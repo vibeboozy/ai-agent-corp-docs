@@ -70,6 +70,64 @@ def test_ground_dbrct_presale_lead_time_without_draft() -> None:
     assert "1.5" in result.answer_text
 
 
+def test_ground_dbrct_prefers_15_over_presale_wait_timeout_neighbors() -> None:
+    """Kirill GS-01: DBRCT 1.5 must win over Presale IB 3.4/6.9 wait/timeout hits."""
+    svc = GroundingService(
+        min_citations=1,
+        min_score=0.25,
+        min_query_overlap=0.12,
+        glossary=AbbreviationGlossary.from_defaults(),
+    )
+    wait_34 = (
+        "3.4. Если от Автора заявки в течение 3 рабочих дней с момента создания "
+        "Заявки информация не поступает, то Сотрудник 1 линии закрывает Заявку "
+        "со статусом «Дисквалифицировано». На этом процесс пресейла прерывается."
+    )
+    wait_69 = (
+        "6.9. Если заявка не обновлялась более 1 рабочего дня, но не более "
+        "3 рабочих дней, Сотрудник 1 линии ежедневно звонит SS. Если заявка не "
+        "обновлялась более 3 рабочих дней, закрывает её как неактуальную "
+        "(Дисквалифицировано)."
+    )
+    result = svc.ground(
+        candidates=[
+            {
+                "document_id": "presale",
+                "chunk_id": "c34",
+                "text": wait_34,
+                "score": 0.45,
+                "document_title": "Пресейловая деятельность Дирекции ИБ",
+                "locator": "3.4.",
+            },
+            {
+                "document_id": "presale",
+                "chunk_id": "c69",
+                "text": wait_69,
+                "score": 0.42,
+                "document_title": "Пресейловая деятельность Дирекции ИБ",
+                "locator": "6.9.",
+            },
+            {
+                "document_id": "dbrct",
+                "chunk_id": "c15",
+                "text": _DBRCT_CLAUSE,
+                "score": 0.327,
+                "document_title": "Проектная деятельность ДБРЦТ",
+                "locator": "1.5.",
+            },
+        ],
+        draft=None,
+        query=_DBRCT_Q,
+    )
+    assert result.ok is True, result
+    assert result.citations[0]["chunk_id"] == "c15"
+    assert result.citations[0]["locator"] == "1.5"
+    first = (result.answer_text or "").splitlines()[0]
+    body = first.split(":", 1)[-1].strip().lower()
+    assert "3" in body and "рабоч" in body
+    assert body.startswith("не менее")
+
+
 def test_purchase_signer_prefers_clause_95_over_checklist_junk() -> None:
     svc = GroundingService(
         min_citations=1, min_score=0.25, min_query_overlap=0.12
@@ -132,3 +190,41 @@ def test_enforce_rejects_checklist_as_who_answer() -> None:
         _JUNK_CHECKLIST, query=_PURCHASE_Q, quote=_JUNK_CHECKLIST
     )
     assert got == ""
+
+
+def test_purchase_signer_prefers_95_over_ds_am_signing() -> None:
+    """Kirill GS-02: not АМ/20.7 DS signing — юр. лица / п. 9.5."""
+    ds_am = (
+        "20.7. Любые изменения условий проекта оформляются Дополнительным "
+        "соглашением (ДС) к договору с Заказчиком. АМ/Менеджер по продаже "
+        "решений подписывает ДС с заказчиком."
+    )
+    svc = GroundingService(min_citations=1, min_score=0.25, min_query_overlap=0.12)
+    result = svc.ground(
+        candidates=[
+            {
+                "document_id": "tech",
+                "chunk_id": "c207",
+                "text": ds_am,
+                "score": 0.55,
+                "document_title": "Организация проектной деятельности",
+                "locator": "20.7.",
+            },
+            {
+                "document_id": "presale",
+                "chunk_id": "c95",
+                "text": _PURCHASE_CLAUSE,
+                "score": 0.40,
+                "document_title": "Пресейловая деятельность Дирекции ИБ",
+                "locator": "9.5.",
+            },
+        ],
+        draft=None,
+        query=_PURCHASE_Q,
+    )
+    assert result.ok is True, result
+    first = (result.answer_text or "").splitlines()[0]
+    assert "Юридические лица Компании" in first
+    assert "АМ" not in first and "ДС" not in first
+    assert result.citations[0]["chunk_id"] == "c95"
+    assert result.citations[0]["locator"] == "9.5"

@@ -5,6 +5,19 @@
 
 **Как прогонять:** для каждого кейса задать `question`, зафиксировать фактический исход в полях лога внизу кейса, сравнить со `scenario` / `expected_*`.
 
+**Offline (CI):** `pytest tests/application/test_golden_set.py` — моки, без сети.
+
+**Online (локально, scenario runner → live LLM/embeddings/Qdrant; без записи в Qdrant/Postgres):**
+
+```bash
+cd server
+# .env с живым стеком; корпус уже ingest в коллекцию
+python scripts/run_golden_scenarios.py
+```
+
+Сценарии: `scenarios/golden-set.yaml`. Лог для вставки обратно: **`artifacts/golden-run.log`**
+(блоки `GOLDEN LOG` → поля `log (paste back)` ниже).
+
 **Баланс:** 16 кейсов — answer 7 · clarify 3 · escalate 3 · refuse 3.
 
 ---
@@ -13,12 +26,12 @@
 
 - **id:** `GS-01`
 - **scenario:** `answer`
-- **question:** За сколько рабочих дней нужно инициировать заявку на пресейл в ДБРЦТ?
+- **question:** За сколько рабочих дней необходимо инициировать заявку на пресейл ДБРЦТ?
 - **expected_behavior:** Короткий ответ: не менее чем за 3 рабочих дня до подачи предложения Заказчику.
 - **expected_doc:** Проектная деятельность ДБРЦТ (Департамента бизнес-решений и цифровой трансформации)
 - **locator:** п. 1.5
 - **quote_snippet:** «Заявка должна быть инициирована не менее чем за 3 рабочих дня до подачи предложения Заказчику.»
-- **notes / traps:** `when_ask` / extract раньше не ловили «За сколько…» и «не менее чем за N»; риск путать с рекомендуемыми сроками выдачи (п. 1.6: 5 / 3 р.д. на точную/бюджетную оценку); `paraphrase_required` если draft пустой.
+- **notes / traps:** lead-time WHEN; не проигрывать Presale IB 3.4/6.9 (wait/timeout «3 рабочих дня» / дисквалификация) — prefer initiation clause п.1.5 даже при score~0.33; риск `paraphrase_required` если 1.5 отфильтрован topical_floor.
 - **log (paste back):**
   - status:
   - summary/answer:
@@ -32,11 +45,11 @@
 - **id:** `GS-02`
 - **scenario:** `answer`
 - **question:** Кто подписывает договоры на закупку?
-- **expected_behavior:** Ответ про юридические лица Компании (не ФИО / не роль сотрудника).
+- **expected_behavior:** Ответ про юридические лица Компании (не ФИО / не роль сотрудника / не АМ+ДС).
 - **expected_doc:** Пресейловая деятельность Дирекции ИБ
 - **locator:** п. 9.5
 - **quote_snippet:** «Все субподрядные договоры по ИБ проектам, кроме перепродажи вендорских сервисов, заключаются от юридических лиц Компании.»
-- **notes / traps:** в 9.5 нет слова «закупку» → lex может увести на checklist / «подписан договор…» (junk orphan); leak/paraphrase gate; summary clause-bleed на «**10.»; нужен agency-style WHO paraphrase («Юридические лица Компании»).
+- **notes / traps:** в 9.5 нет «закупку»/«подписывает» → hybrid+LLM rerank часто не кладёт 9.5 в top-5 (DBRCT 8.7/17.6, сроки подписания, 20.7) → paraphrase_required. Fix: synonym expand + deterministic purchase-WHO blend (skip LLM rerank); grounding prefer agency over DS/AM.
 - **log (paste back):**
   - status:
   - summary/answer:
@@ -284,11 +297,11 @@
 - **id:** `GS-16`
 - **scenario:** `refuse`
 - **question:** Что говорит Конституция РФ о свободе слова?
-- **expected_behavior:** При `regs_only` — отказ (тема не в ALLOWED_TOPICS). При `regs_legal` с Конституцией в allowlist кейс **не** применять как refuse.
+- **expected_behavior:** Отказ: Конституция не в `ALLOWED_TOPICS` → `off_topic` / refuse. Не answer junk из корпоративных регламентов.
 - **expected_doc:** —
 - **locator:** —
 - **quote_snippet:** —
-- **notes / traps:** зависит от режима; для golden default считать `regs_only`. Не escalate в quality.
+- **notes / traps:** dual-mode `regs_only` снят; gate = **ALLOWED_TOPICS**. Без «Конституция РФ» в allowlist — refuse до retrieve. Если ingest + ALLOWED_TOPICS включает Конституцию — кейс не как refuse.
 - **log (paste back):**
   - status:
   - summary/answer:

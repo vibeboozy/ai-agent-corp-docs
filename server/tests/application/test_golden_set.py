@@ -284,14 +284,65 @@ def test_golden_set_fixture_lists_all_sixteen_cases() -> None:
 # --- GS-01…07 answer (grounding / graph) ---
 
 
+_HIT_PRESALE_WAIT_34 = {
+    "document_id": "presale-dib",
+    "chunk_id": "c-3.4",
+    "text": (
+        "3.4. Если от Автора заявки в течение 3 рабочих дней с момента создания "
+        "Заявки информация не поступает, то Сотрудник 1 линии закрывает Заявку "
+        "со статусом «Дисквалифицировано». На этом процесс пресейла прерывается."
+    ),
+    "score": 0.45,
+    "document_title": "Пресейловая деятельность Дирекции ИБ",
+    "locator": "3.4.",
+    "source": "ingest",
+}
+
+_HIT_PRESALE_WAIT_69 = {
+    "document_id": "presale-dib",
+    "chunk_id": "c-6.9",
+    "text": (
+        "6.9. Если заявка не обновлялась более 1 рабочего дня, но не более "
+        "3 рабочих дней, Сотрудник 1 линии ежедневно звонит SS. Если не "
+        "обновлялась более 3 рабочих дней — Дисквалифицировано."
+    ),
+    "score": 0.42,
+    "document_title": "Пресейловая деятельность Дирекции ИБ",
+    "locator": "6.9.",
+    "source": "ingest",
+}
+
+_HIT_DS_AM_207 = {
+    "document_id": "tech-dir",
+    "chunk_id": "c-20.7",
+    "text": (
+        "20.7. Любые изменения условий проекта оформляются Дополнительным "
+        "соглашением (ДС) к договору с Заказчиком. АМ/Менеджер по продаже "
+        "решений подписывает ДС с заказчиком."
+    ),
+    "score": 0.55,
+    "document_title": "Организация проектной деятельности",
+    "locator": "20.7.",
+    "source": "ingest",
+}
+
+
 def test_gs01_dbrct_presale_three_working_days() -> None:
     q = (
-        "За сколько рабочих дней нужно инициировать заявку на пресейл в ДБРЦТ?"
+        "За сколько рабочих дней необходимо инициировать заявку на пресейл ДБРЦТ?"
     )
+    # Rival Presale wait/timeout hits outrank by raw score/lex — must still pick 1.5.
     result = _grounding().ground(
-        candidates=[_HIT_DBRCT_15], draft=None, query=q
+        candidates=[
+            _HIT_PRESALE_WAIT_34,
+            _HIT_PRESALE_WAIT_69,
+            {**_HIT_DBRCT_15, "score": 0.327},
+        ],
+        draft=None,
+        query=q,
     )
     assert result.ok, result
+    assert result.citations[0]["chunk_id"] == "c-1.5"
     assert "3" in (result.answer_text or "")
     assert "рабоч" in (result.answer_text or "").lower()
     assert "1.5" in (result.answer_text or "")
@@ -300,14 +351,15 @@ def test_gs01_dbrct_presale_three_working_days() -> None:
 def test_gs02_purchase_signer_not_checklist_junk() -> None:
     q = "Кто подписывает договоры на закупку?"
     result = _grounding().ground(
-        candidates=[_HIT_JUNK_SIGNED, _HIT_PURCHASE_95],
-        draft="Ответ: Подписан договор на услуги с заказчиком.",
+        candidates=[_HIT_JUNK_SIGNED, _HIT_DS_AM_207, _HIT_PURCHASE_95],
+        draft="Ответ: АМ подписывает ДС с заказчиком.",
         query=q,
     )
     assert result.ok, result
     first = (result.answer_text or "").splitlines()[0]
     assert "Юридические лица Компании" in first
     assert "подписан договор на услуги" not in first.lower()
+    assert "АМ" not in first and "ДС" not in first
     assert result.citations[0]["locator"] == "9.5"
 
 
@@ -543,10 +595,17 @@ async def test_gs15_borscht_graph_refuses() -> None:
     assert out["outcome"] == "refuse"
 
 
+def test_gs16_constitution_is_off_topic_without_allowed_topics() -> None:
+    """ALLOWED_TOPICS (not dual-mode): Конституция → refuse unless allowlisted."""
+    q = "Что говорит Конституция РФ о свободе слова?"
+    assert is_off_topic(q)
+    # Even if LLM would say specific, heuristic refuse runs first.
+
+
 @pytest.mark.asyncio
-async def test_gs16_constitution_regs_only_refuses() -> None:
-    """Default allowlist has no Конституция → classify off_topic stays refuse."""
-    graph = _graph(label="off_topic", hits=[])
+async def test_gs16_constitution_graph_refuses_despite_specific_label() -> None:
+    """Junk regs must not answer Constitution when not in ALLOWED_TOPICS."""
+    graph = _graph(label="specific", hits=[_HIT_PA_NEIGHBOR_66])
     out = await graph.ainvoke(
         {
             "user_message": "Что говорит Конституция РФ о свободе слова?",
@@ -556,4 +615,6 @@ async def test_gs16_constitution_regs_only_refuses() -> None:
         }
     )
     assert out["outcome"] == "refuse"
+    assert out.get("specificity") == "off_topic"
     assert "escalate" not in (out.get("node_trace") or [])
+    assert "answer" not in (out.get("node_trace") or [])

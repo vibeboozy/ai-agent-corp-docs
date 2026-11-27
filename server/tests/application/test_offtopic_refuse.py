@@ -47,6 +47,16 @@ def test_allowed_topics_allow_constitution_refuse_weather() -> None:
     assert not is_supported_domain("Какая погода?", topics)
 
 
+def test_constitution_without_allowed_topics_is_off_topic() -> None:
+    """Default corporate allowlist: Конституция must refuse (GS-16), not retrieve regs."""
+    q = "Что говорит Конституция РФ о свободе слова?"
+    assert is_off_topic(q)
+    assert not is_supported_domain(q)
+    topics = resolve_allowed_topics("Конституция РФ")
+    assert not is_off_topic(q, allowed_topics=topics)
+    assert is_supported_domain(q, topics)
+
+
 def test_route_after_assess_refuse() -> None:
     assert graph_mod._route_after_assess({"specificity": "off_topic"}) == "refuse"
     assert graph_mod._route_after_assess({"specificity": "specific"}) == "retrieve"
