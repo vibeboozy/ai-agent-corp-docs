@@ -39,7 +39,11 @@ def test_ground_prefers_lexically_relevant_chunk() -> None:
     )
     assert result.ok
     assert result.citations[0]["chunk_id"] == "c72"
-    assert "Менеджер по поставке" in (result.answer_text or "")
+    answer = result.answer_text or ""
+    assert answer.startswith("Ответ:")
+    assert "Источник:" in answer
+    assert "Цитата:" in answer
+    assert "Менеджер по поставке" in answer
     assert not (result.citations[0]["quote"] or "").lower().startswith("проекта.")
 
 
@@ -60,8 +64,11 @@ def test_ground_uses_draft_when_overlapping_chunk() -> None:
     )
     result = svc.ground(candidates=candidates, draft=draft, query="планирование поставок")
     assert result.ok
-    assert "Менеджер по поставке" in (result.answer_text or "")
-    assert not (result.answer_text or "").endswith("Аккаунт-менедже")  # complete
+    answer = result.answer_text or ""
+    assert answer.startswith("Ответ:")
+    assert "Менеджер по поставке" in answer
+    assert "Источник:" in answer
+    assert not answer.splitlines()[0].endswith("Аккаунт-менедже")  # complete
 
 
 def test_ground_answer_stops_before_next_numbered_clause() -> None:
@@ -88,6 +95,9 @@ def test_ground_answer_stops_before_next_numbered_clause() -> None:
     )
     assert result.ok
     answer = result.answer_text or ""
+    assert answer.startswith("Ответ:")
+    assert "Источник:" in answer
+    assert "Цитата:" in answer
     assert "юридических лиц Компании." in answer
     assert "**10" not in answer
     assert not answer.rstrip().endswith("**10.")
@@ -118,6 +128,8 @@ def test_ground_strips_think_from_draft_before_answer() -> None:
     )
     assert result.ok
     answer = result.answer_text or ""
+    assert answer.startswith("Ответ:")
     assert "<think>" not in answer.lower()
     assert "</think>" not in answer.lower()
     assert "руководитель проекта" in answer
+    assert "Источник:" in answer

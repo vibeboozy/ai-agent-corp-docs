@@ -1,13 +1,14 @@
 """
 ANCHOR: app.application.grounding.service
 PURPOSE: Citation check; refuse unsupported claims (ANC-GROUND-01/02).
-Dependencies: domain ChunkCitation; settings thresholds; text_util
+Dependencies: domain ChunkCitation; settings thresholds; text_util; answer_format
 CRITICAL: Final answers MUST be chunk-supported (ANC-GROUND-01/02).
 DO:
-- Prefer complete-sentence answers over raw mid-chunk quote stubs
+- Prefer short human Ответ + authoritative Источник/Цитата from citations
 - Refuse or escalate unsupported claims
 DONT:
 - Treat LLM draft as sole source of truth without chunk overlap
+- Dump raw regulation prose as the only user-facing body
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.application.dialogue.answer_format import extract_answer_body, format_human_answer
 from app.application.text_util import (
     complete_sentences,
     lexical_overlap,
@@ -32,7 +34,7 @@ class GroundingResult:
 
 
 class GroundingService:
-    """Require min citations above score threshold; build complete-sentence answers."""
+    """Require min citations above score threshold; build human-readable answers."""
 
     def __init__(self, *, min_citations: int = 1, min_score: float = 0.0) -> None:
         self._min_citations = min_citations
@@ -93,13 +95,28 @@ class GroundingService:
             for c in usable[:3]
         ]
 
-        title = top.get("document_title") or top["document_id"]
-        chunk_text = complete_sentences(str(top.get("text") or ""), max_chars=900)
+        title = str(top.get("document_title") or top["document_id"])
+        locator = top.get("locator") or top.get("section_title")
+        quote = str(citations[0].get("quote") or top.get("text") or "")
+        chunk_text = str(top.get("text") or "")
         # Strip CoT wrappers even if a Fake/bypass LLM skipped HttpLLMClient.complete().
         draft_clean = strip_think_blocks(draft or "")
+        answer_body: str | None = None
         # Prefer LLM draft only when it overlaps the supporting chunk (grounded).
-        if draft_clean and lexical_overlap(draft_clean, str(top.get("text") or "")) >= 0.15:
-            answer = complete_sentences(draft_clean, max_chars=900)
-        else:
-            answer = f"Согласно регламенту «{title}»: {chunk_text}"
+        if draft_clean:
+            draft_for_overlap = extract_answer_body(draft_clean) or draft_clean
+            if lexical_overlap(draft_for_overlap, chunk_text) >= 0.15:
+                answer_body = extract_answer_body(draft_clean) or complete_sentences(
+                    draft_clean, max_chars=400
+                )
+        if not answer_body:
+            # Fallback: still human template; body is the supporting clause (no long dump prefix).
+            answer_body = complete_sentences(chunk_text, max_chars=400)
+
+        answer = format_human_answer(
+            answer=answer_body,
+            document_title=title,
+            locator=str(locator) if locator else None,
+            quote=quote,
+        )
         return GroundingResult(ok=True, citations=citations, answer_text=answer)

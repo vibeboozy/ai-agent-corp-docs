@@ -19,6 +19,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from app.adapters.llm.port import LLMClient
+from app.application.dialogue.answer_format import (
+    build_answer_system_prompt,
+    build_answer_user_prompt,
+)
 from app.application.dialogue.offtopic import (
     OFF_TOPIC_REFUSAL_RU,
     is_off_topic,
@@ -205,16 +209,9 @@ def make_nodes(deps: DialogueDeps) -> dict[str, Callable[[DialogueState], Any]]:
             t0 = time.perf_counter()
             topics_block = format_topics_for_prompt(list(deps.allowed_topics))
             draft = await deps.llm.complete(
-                system=(
-                    "You are a grounded assistant for these in-domain topics:\n"
-                    f"{topics_block}\n"
-                    "Answer ONLY from the provided passages in Russian. "
-                    "Write complete sentences (no mid-thought truncation). "
-                    "If passages do not support an answer, reply with UNSUPPORTED."
-                ),
-                user=(
-                    f"Question: {user_message}\n"
-                    "Passages:\n" + "\n".join(passages)
+                system=build_answer_system_prompt(topics_block),
+                user=build_answer_user_prompt(
+                    question=user_message, passages=passages
                 ),
             )
             complete_ms = round((time.perf_counter() - t0) * 1000, 2)
