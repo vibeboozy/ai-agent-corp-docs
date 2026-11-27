@@ -470,12 +470,9 @@ export class QualityTab {
         submitBtn.disabled = true;
         submitBtn.innerHTML = `<span>Сохранение...</span>`;
 
-        try {
-          const updatedTicket = await apiClient.resolveTicket(ticket.ticket_id, {
-            answer,
-            regulation_ref
-          });
-
+        // Единая обработка «тикет решён»: обновляет store, чат и показывает тост.
+        // Вызывается и при прямом успехе, и при восстановлении после сетевого обрыва.
+        const applyResolved = (resolvedAt, toastMsg) => {
           const currentTickets = store.getState().tickets;
           const updatedList = currentTickets.map((t) => {
             if (t.ticket_id === ticket.ticket_id) {
@@ -484,7 +481,7 @@ export class QualityTab {
                 status: 'resolved',
                 answer,
                 regulation_ref,
-                resolved_at: updatedTicket.resolved_at || new Date().toISOString()
+                resolved_at: resolvedAt || new Date().toISOString()
               };
             }
             return t;
@@ -536,8 +533,33 @@ export class QualityTab {
             }
           }
 
-          toastSuccess('Ответ сохранён. База знаний пополнена, ответ добавлен в чат!');
+          toastSuccess(toastMsg || 'Ответ сохранён. База знаний пополнена, ответ добавлен в чат!');
+        };
+
+        try {
+          const updatedTicket = await apiClient.resolveTicket(ticket.ticket_id, {
+            answer,
+            regulation_ref
+          });
+          applyResolved(updatedTicket.resolved_at);
         } catch (err) {
+          // Сетевой обрыв не означает, что бэкенд не сохранил ответ: он мог довести
+          // операцию уже после разрыва соединения. Проверяем фактический статус,
+          // прежде чем возвращать кнопку — иначе повторное нажатие создаёт дубли.
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          let recovered = null;
+          try {
+            const resolvedTickets = await apiClient.getTickets('resolved');
+            recovered = resolvedTickets.find((t) => t.ticket_id === ticket.ticket_id) || null;
+          } catch (checkErr) {
+            recovered = null;
+          }
+
+          if (recovered) {
+            applyResolved(recovered.resolved_at, 'Ответ дошёл до сервера, несмотря на обрыв соединения. База знаний пополнена!');
+            return;
+          }
+
           submitBtn.disabled = false;
           submitBtn.innerHTML = `<span>Сохранить ответ и пополнить базу знаний</span>`;
           toastError(err.message || 'Ошибка сохранения ответа');
