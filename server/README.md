@@ -125,7 +125,7 @@ python scripts/run_golden_scenarios.py
 # optional: --only GS-01,GS-02  --out artifacts/golden-run.log
 ```
 
-Scenarios: `scenarios/golden-set.yaml` (GS-01…16).  
+Scenarios: `scenarios/golden-set.yaml` (GS-01…16 + GS-01b).  
 **Paste back:** `artifacts/golden-run.log` (expected vs actual, citations, gates).
 
 ### 8. Alembic (Postgres)

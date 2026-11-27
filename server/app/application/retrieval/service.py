@@ -43,6 +43,31 @@ _PURCHASE_NOISE_HIT_RE = re.compile(
     r"подписан\w*\s+дс|подписыва\w*\s+дс|"
     r"ам\s*/\s*менеджер.{0,60}подписыва)"
 )
+# Lead-time WHEN — «За сколько… инициировать заявку на пресейл [в] ДБРЦТ?» (GS-01 / GS-01b).
+# Preposition «в» before org cue flips dense/sparse toward Presale IB wait/timeout
+# neighbors (3.4 / 6.9); initiation clause п.1.5 lacks «пресейл»/«ДБРЦТ» in body.
+_LEAD_TIME_INIT_ASK_RE = re.compile(
+    r"(?iu)(?:за\s+сколько|сколько\s+рабоч|в\s+какой\s+срок|за\s+какой\s+срок)"
+    r".{0,100}?иници\w+.{0,80}?(?:заявк|пресейл)"
+    r"|иници\w+.{0,80}?(?:заявк|пресейл).{0,60}?"
+    r"(?:за\s+сколько|рабоч(?:их|ий)?\s+дн)"
+)
+_LEAD_TIME_INIT_EXPAND = (
+    " не менее чем за инициирована заявка до подачи предложения Заказчику "
+    "Проектная деятельность ДБРЦТ"
+)
+_LEAD_TIME_CLAUSE_HIT_RE = re.compile(
+    r"(?iu)(?:не\s+менее\s+чем\s+за|иници\w+.{0,48}заявк|заявк\w*.{0,64}иници)"
+)
+_WAIT_TIMEOUT_HIT_RE = re.compile(
+    r"(?iu)(?:не\s+поступа|не\s+обновлял|жду\s+доп|дисквалифицир|"
+    r"не\s+более\s+\d+\s+рабоч)"
+)
+_ORG_TITLE_CUES = (
+    ("дбрцт", 1.0),
+    ("дирекции иб", 0.5),
+    ("тех дирек", 0.5),
+)
 
 
 @dataclass
@@ -92,6 +117,22 @@ class RetrievalService:
     def _is_purchase_who(query: str) -> bool:
         return bool(_PURCHASE_WHO_RE.search(query or ""))
 
+    @staticmethod
+    def _is_lead_time_init(query: str) -> bool:
+        return bool(_LEAD_TIME_INIT_ASK_RE.search(query or ""))
+
+    @staticmethod
+    def _org_title_boost(query: str, hit: dict[str, Any]) -> float:
+        q = (query or "").lower().replace("ё", "е")
+        title = str(hit.get("document_title") or "").lower().replace("ё", "е")
+        if not q or not title:
+            return 0.0
+        boost = 0.0
+        for cue, weight in _ORG_TITLE_CUES:
+            if cue in q and cue in title:
+                boost = max(boost, weight)
+        return boost
+
     def _expand_query(self, query: str) -> str:
         expanded = query
         if self._glossary is not None:
@@ -99,6 +140,9 @@ class RetrievalService:
         # Deterministic synonym expand so п.9.5 can enter the hybrid pool.
         if self._is_purchase_who(query):
             expanded = f"{expanded}{_PURCHASE_WHO_EXPAND}"
+        # Lead-time initiation: surface DBRCT 1.5 even when «в» steers hybrid to IB.
+        if self._is_lead_time_init(query):
+            expanded = f"{expanded}{_LEAD_TIME_INIT_EXPAND}"
         return expanded
 
     def _prefer_sort(self, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -161,11 +205,15 @@ class RetrievalService:
 
         Purchase WHO (GS-02): boost subcontract/agency clauses; demote DS/timing
         signing neighbors so п.9.5 can surface without flaky LLM rerank.
+
+        Lead-time initiation (GS-01 / GS-01b): boost «не менее чем за… инициир…»
+        clauses + matching org title; demote Presale wait/timeout / disqualify neighbors.
         """
         if not hits:
             return hits
         w = self._lexical_weight
         purchase_who = self._is_purchase_who(query)
+        lead_time_init = self._is_lead_time_init(query)
         blended: list[dict[str, Any]] = []
         # Prefer preserved raw vector_score on re-blend (after LLM nudge).
         max_vec = max(
@@ -190,6 +238,10 @@ class RetrievalService:
             if purchase_who and _PURCHASE_AGENCY_HIT_RE.search(text):
                 # «субподрядные… заключаются от юридических лиц» lacks «закупку».
                 lex = min(1.0, max(lex, 0.55) + 0.35)
+            if lead_time_init and _LEAD_TIME_CLAUSE_HIT_RE.search(text):
+                # п.1.5 body has no «пресейл»/«ДБРЦТ» — lex alone loses to IB wait.
+                lex = min(1.0, max(lex, 0.55) + 0.35)
+            org_boost = self._org_title_boost(query, h)
             h["lexical_score"] = lex
             # Demote high-vector / low-lexical mid-chunk noise (e.g. §17 vs §7.2).
             rank = (1.0 - w) * vec_n * (0.2 + 0.8 * max(lex, 0.05)) + w * lex
@@ -204,6 +256,13 @@ class RetrievalService:
                     rank *= 2.2
                 elif _PURCHASE_NOISE_HIT_RE.search(text):
                     rank *= 0.25
+            if lead_time_init:
+                if _LEAD_TIME_CLAUSE_HIT_RE.search(text):
+                    rank *= 2.2
+                elif _WAIT_TIMEOUT_HIT_RE.search(text):
+                    rank *= 0.25
+                if org_boost:
+                    rank *= 1.0 + 0.8 * org_boost
             h["rank_score"] = rank
             # Exposed score tracks rank (audits/citations) while vector_score stays raw.
             h["score"] = rank
@@ -282,11 +341,15 @@ class RetrievalService:
         hits = self._prefer_sort(hits)
 
         rerank_ms = 0.0
-        # Purchase WHO: skip LLM rerank (flaky / temp variance); keep deterministic blend.
-        use_llm_rerank = self._rerank_mode == "llm" and not self._is_purchase_who(query)
+        # Purchase WHO / lead-time init: skip LLM rerank (flaky); keep deterministic blend.
+        skip_llm = self._is_purchase_who(query) or self._is_lead_time_init(query)
+        use_llm_rerank = self._rerank_mode == "llm" and not skip_llm
         effective_mode = self._rerank_mode
         if self._rerank_mode == "llm" and not use_llm_rerank:
-            effective_mode = "none+purchase_who"
+            if self._is_purchase_who(query):
+                effective_mode = "none+purchase_who"
+            elif self._is_lead_time_init(query):
+                effective_mode = "none+lead_time_init"
         if use_llm_rerank:
             pool = hits[: self._rerank_candidates]
             t2 = time.perf_counter()

@@ -183,3 +183,78 @@ async def test_purchase_who_surfaces_95_over_ds_timing_neighbors() -> None:
     ids = [h["chunk_id"] for h in result.hits]
     assert "c-9.5" in ids
     assert ids[0] == "c-9.5"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "За сколько рабочих дней необходимо инициировать заявку на пресейл ДБРЦТ?",
+        "За сколько рабочих дней необходимо инициировать заявку на пресейл в ДБРЦТ?",
+    ],
+)
+async def test_lead_time_init_surfaces_dbrct_15_over_ib_wait(
+    question: str,
+) -> None:
+    """GS-01 / GS-01b: «в» must not leave DBRCT 1.5 buried under IB 3.4/6.9."""
+    hits = [
+        {
+            "document_id": "presale",
+            "chunk_id": "c-3.4",
+            "text": (
+                "3.4. Если от Автора заявки в течение 3 рабочих дней с момента "
+                "создания Заявки информация не поступает, то Сотрудник 1 линии "
+                "закрывает Заявку со статусом «Дисквалифицировано». На этом "
+                "процесс пресейла прерывается."
+            ),
+            "score": 0.72,
+            "locator": "3.4.",
+            "document_title": "Пресейловая деятельность Дирекции ИБ",
+            "source": "ingest",
+        },
+        {
+            "document_id": "presale",
+            "chunk_id": "c-6.9",
+            "text": (
+                "6.9. Если заявка не обновлялась более 1 рабочего дня, но не более "
+                "3 рабочих дней — Дисквалифицировано."
+            ),
+            "score": 0.70,
+            "locator": "6.9.",
+            "document_title": "Пресейловая деятельность Дирекции ИБ",
+            "source": "ingest",
+        },
+        {
+            "document_id": "dbrct",
+            "chunk_id": "c-1.5",
+            "text": (
+                "1.5. Заявка должна быть инициирована не менее чем за 3 рабочих дня "
+                "до подачи предложения Заказчику."
+            ),
+            "score": 0.33,
+            "locator": "1.5.",
+            "document_title": "Проектная деятельность ДБРЦТ",
+            "source": "ingest",
+        },
+    ]
+    llm = AsyncMock()
+    llm.complete = AsyncMock(return_value="0,1,2")  # would prefer IB wait first
+    emb = _Emb()
+    vs = _VS(hits)
+    svc = RetrievalService(
+        embeddings=emb,
+        vectorstore=vs,
+        llm=llm,
+        glossary=AbbreviationGlossary.from_defaults(),
+        rerank_mode="llm",
+        rerank_top_k=5,
+        rerank_candidates=20,
+        lexical_weight=0.35,
+    )
+    result = await svc.retrieve_with_meta(question, limit=5)
+    assert emb.last_texts and "не менее чем за" in emb.last_texts[0]
+    assert "инициирована" in emb.last_texts[0]
+    assert result.rerank_mode == "none+lead_time_init"
+    llm.complete.assert_not_awaited()
+    ids = [h["chunk_id"] for h in result.hits]
+    assert ids[0] == "c-1.5"

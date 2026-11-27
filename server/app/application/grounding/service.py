@@ -370,6 +370,8 @@ class GroundingService:
                 )
             # Lead-time WHEN: if an initiation/deadline clause is in the pool, keep
             # those (and drop wait/timeout neighbors that outrank by raw lex score).
+            # If the pool is only wait/timeout (DBRCT 1.5 missed retrieval — e.g. «в
+            # ДБРЦТ» phrasing), escalate rather than answer «в течение 3 р.д.» from IB 3.4.
             if lead_time_ask and usable:
                 lead_hits = [
                     c
@@ -378,6 +380,21 @@ class GroundingService:
                 ]
                 if lead_hits:
                     usable = lead_hits
+                else:
+                    cleaned = [
+                        c
+                        for c in usable
+                        if not self._is_wait_timeout_clause(str(c.get("text") or ""))
+                    ]
+                    if cleaned:
+                        usable = cleaned
+                    else:
+                        return GroundingResult(
+                            ok=False,
+                            citations=[],
+                            answer_text=None,
+                            reason="irrelevant_citations",
+                        )
             # Purchase WHO: prefer agency/subcontract clauses when present.
             if purchase_ask and usable:
                 purchase_hits = [
