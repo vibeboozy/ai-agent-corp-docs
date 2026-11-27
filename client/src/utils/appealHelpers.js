@@ -98,6 +98,96 @@ export function firstUserQuestionFromMessages(messages) {
 }
 
 /**
+ * Client-side preview of the quality-service email for an escalate answer.
+ * Server does not persist this draft on messages — the chat UI synthesizes it
+ * on live escalate and must recompute the same shape when reloading history.
+ */
+export function buildEscalationEmailDraft(question) {
+  const q = typeof question === 'string' ? question.trim() : '';
+  const topic = q || 'вопрос по регламенту';
+  return {
+    to: 'quality@company.ru',
+    subject: `Запрос разъяснения регламента: ${topic.slice(0, 45)}...`,
+    body:
+      `Здравствуйте!\n\nПрошу предоставить официальное разъяснение по вопросу:\n«${topic}»\n\nС уважением,\nСотрудник отдела сопровождения`
+  };
+}
+
+/**
+ * Whether the quality-preview form should render for an escalate message.
+ * Hide after local send confirmation, or when the appeal is no longer awaiting quality.
+ */
+export function shouldShowEscalationPreviewForm(msg, appealStatus) {
+  if (!msg || msg.status !== 'escalate') return false;
+  if (msg.ticketCreated) return false;
+  if (
+    appealStatus === 'resolved_by_officer' ||
+    appealStatus === 'closed' ||
+    appealStatus === 'answered'
+  ) {
+    return false;
+  }
+  return Boolean(msg.email_draft);
+}
+
+/**
+ * Attach synthesized email_draft to escalate messages using the preceding user question.
+ * Idempotent: keeps an existing draft / ticketCreated / ticketId when present.
+ */
+export function attachEscalationEmailDrafts(messages) {
+  if (!Array.isArray(messages)) return [];
+  let lastUserQuestion = '';
+  return messages.map((m) => {
+    if (m && m.role === 'user' && m.content) {
+      lastUserQuestion = String(m.content).trim();
+    }
+    const isEscalate =
+      m &&
+      (m.status === 'escalate' || m.message_kind === 'escalation_notice');
+    if (!isEscalate) return m;
+    if (m.email_draft) {
+      return {
+        ...m,
+        ticketCreated: Boolean(m.ticketCreated),
+        ticketId: m.ticketId || null
+      };
+    }
+    return {
+      ...m,
+      email_draft: buildEscalationEmailDraft(lastUserQuestion),
+      ticketCreated: Boolean(m.ticketCreated),
+      ticketId: m.ticketId || null
+    };
+  });
+}
+
+/**
+ * Merge local ticketCreated / ticketId / edited email_draft onto server-reloaded messages
+ * so a return to the same appeal keeps send-confirmation (or an edited preview).
+ */
+export function mergeLocalEscalationState(serverMessages, localMessages) {
+  const enriched = attachEscalationEmailDrafts(serverMessages);
+  if (!Array.isArray(localMessages) || localMessages.length === 0) return enriched;
+  const localById = new Map(
+    localMessages.filter((m) => m && m.id != null).map((m) => [String(m.id), m])
+  );
+  return enriched.map((m) => {
+    if (!m || m.id == null) return m;
+    const local = localById.get(String(m.id));
+    if (!local) return m;
+    const isEscalate =
+      m.status === 'escalate' || m.message_kind === 'escalation_notice';
+    if (!isEscalate) return m;
+    return {
+      ...m,
+      email_draft: local.email_draft || m.email_draft,
+      ticketCreated: Boolean(local.ticketCreated) || Boolean(m.ticketCreated),
+      ticketId: local.ticketId || m.ticketId || null
+    };
+  });
+}
+
+/**
  * Server allows further turns unless appeal is closed (409 CONFLICT_STATUS).
  * answered / clarifying / escalated / open → continue; closed → new chat.
  */

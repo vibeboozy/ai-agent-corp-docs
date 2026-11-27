@@ -6,12 +6,16 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   APPEALS_LIST_LIMIT,
+  attachEscalationEmailDrafts,
+  buildEscalationEmailDraft,
   canSendInAppeal,
   createLocalSessionId,
   firstUserQuestionFromMessages,
   isServerAppealId,
   mapAppealStatusToTicketStatus,
+  mergeLocalEscalationState,
   resolveEmployeeQuestion,
+  shouldShowEscalationPreviewForm,
   ticketStatusLabel
 } from '../src/utils/appealHelpers.js';
 
@@ -123,5 +127,113 @@ describe('APPEALS_LIST_LIMIT', () => {
   it('requests more than the old felt limit of 50', () => {
     assert.ok(APPEALS_LIST_LIMIT > 50);
     assert.ok(APPEALS_LIST_LIMIT <= 200);
+  });
+});
+
+describe('buildEscalationEmailDraft / attachEscalationEmailDrafts', () => {
+  it('builds preview fields from the employee question', () => {
+    const draft = buildEscalationEmailDraft('Какая пороговая маржа?');
+    assert.equal(draft.to, 'quality@company.ru');
+    assert.match(draft.subject, /Какая пороговая маржа/);
+    assert.match(draft.body, /Какая пороговая маржа\?/);
+  });
+
+  it('recomputes email_draft on escalate history without a stored draft', () => {
+    const messages = [
+      { id: 1, role: 'user', content: 'Какая пороговая маржа?' },
+      {
+        id: 2,
+        role: 'assistant',
+        content: 'Нет в регламентах',
+        status: 'escalate',
+        message_kind: 'escalation_notice'
+      }
+    ];
+    const out = attachEscalationEmailDrafts(messages);
+    assert.equal(out[1].status, 'escalate');
+    assert.ok(out[1].email_draft);
+    assert.match(out[1].email_draft.body, /Какая пороговая маржа\?/);
+    assert.equal(out[1].ticketCreated, false);
+  });
+
+  it('keeps an existing draft and ticketCreated flag', () => {
+    const messages = [
+      { id: 1, role: 'user', content: 'Q' },
+      {
+        id: 2,
+        role: 'assistant',
+        status: 'escalate',
+        email_draft: { to: 'a@b.c', subject: 'S', body: 'B' },
+        ticketCreated: true,
+        ticketId: 'uuid-1'
+      }
+    ];
+    const out = attachEscalationEmailDrafts(messages);
+    assert.equal(out[1].email_draft.subject, 'S');
+    assert.equal(out[1].ticketCreated, true);
+    assert.equal(out[1].ticketId, 'uuid-1');
+  });
+});
+
+describe('shouldShowEscalationPreviewForm', () => {
+  const msg = {
+    status: 'escalate',
+    email_draft: { to: 'quality@company.ru', subject: 'S', body: 'B' },
+    ticketCreated: false
+  };
+
+  it('shows form for escalated / unknown appeal status', () => {
+    assert.equal(shouldShowEscalationPreviewForm(msg, 'escalated'), true);
+    assert.equal(shouldShowEscalationPreviewForm(msg, null), true);
+  });
+
+  it('hides form after send or when appeal is no longer awaiting quality', () => {
+    assert.equal(
+      shouldShowEscalationPreviewForm({ ...msg, ticketCreated: true }, 'escalated'),
+      false
+    );
+    assert.equal(shouldShowEscalationPreviewForm(msg, 'resolved_by_officer'), false);
+    assert.equal(shouldShowEscalationPreviewForm(msg, 'closed'), false);
+    assert.equal(shouldShowEscalationPreviewForm(msg, 'answered'), false);
+  });
+});
+
+describe('mergeLocalEscalationState', () => {
+  it('preserves local ticketCreated across server reload', () => {
+    const server = [
+      { id: 'u1', role: 'user', content: 'Вопрос без ответа в БЗ' },
+      {
+        id: 'a1',
+        role: 'assistant',
+        content: 'Эскалация',
+        status: 'escalate',
+        message_kind: 'escalation_notice'
+      }
+    ];
+    const local = [
+      { id: 'u1', role: 'user', content: 'Вопрос без ответа в БЗ' },
+      {
+        id: 'a1',
+        role: 'assistant',
+        status: 'escalate',
+        email_draft: { to: 'quality@company.ru', subject: 'edited', body: 'edited body' },
+        ticketCreated: true,
+        ticketId: 'a1'
+      }
+    ];
+    const merged = mergeLocalEscalationState(server, local);
+    assert.equal(merged[1].ticketCreated, true);
+    assert.equal(merged[1].ticketId, 'a1');
+    assert.equal(merged[1].email_draft.subject, 'edited');
+  });
+
+  it('still attaches a fresh draft when local cache has none', () => {
+    const server = [
+      { id: 'u1', role: 'user', content: 'Маржа?' },
+      { id: 'a1', role: 'assistant', status: 'escalate', message_kind: 'escalation_notice' }
+    ];
+    const merged = mergeLocalEscalationState(server, []);
+    assert.ok(merged[1].email_draft);
+    assert.equal(merged[1].ticketCreated, false);
   });
 });
