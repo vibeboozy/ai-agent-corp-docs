@@ -101,6 +101,8 @@ def _build_docling(settings: Settings) -> Any:
         connect_timeout_s=settings.docling_connect_timeout_s,
         concurrency=settings.docling_concurrency,
         split_pages=settings.docling_split_pages,
+        pdf_split_pages=settings.docling_pdf_split_pages,
+        pdf_part_cache_dir=settings.docling_pdf_part_cache_dir,
         ocr_langs=settings.docling_ocr_langs,
         chunker=settings.docling_chunker,
         chunk_tokenizer=settings.docling_chunk_tokenizer,

@@ -12,5 +12,8 @@ venv/
 .ruff_cache/
 *.egg
 
+# Optional Docling per-range PDF convert cache (DOCLING_PDF_PART_CACHE_DIR)
+.cache/
+
 # Local RAG corpus (DOCS_CORPUS_PATH / DOCS_DIR; default ./docs — not committed)
 docs/

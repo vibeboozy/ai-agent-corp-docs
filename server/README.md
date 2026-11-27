@@ -43,6 +43,8 @@ cp .env.example .env
 
 **Ingest / retrieval knobs:** `DOCLING_*` (OCR, HybridChunker window sizes, concurrency) and `RERANK_MODE=none|llm` (with `RERANK_CANDIDATES` / `RERANK_TOP_K`) — see `.env.example`.
 
+**Large PDFs:** local files above `DOCLING_PDF_SPLIT_PAGES` (default **40**) are converted in page-range chunks via Docling `options.page_range`, then merged with absolute page markers (avoids Docling Serve timeouts on ~hundreds of pages). Optional part cache: `DOCLING_PDF_PART_CACHE_DIR=.cache/docling/parts`. This is separate from `DOCLING_SPLIT_PAGES` (boolean markdown page-break placeholders).
+
 ### 3. Run API
 
 ```bash
