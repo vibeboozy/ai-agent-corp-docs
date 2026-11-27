@@ -15,6 +15,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from starlette.middleware.cors import CORSMiddleware
 
 from app.api.router import build_api_router
 from app.config.factories import get_container, reset_container
@@ -51,6 +52,13 @@ def create_app() -> FastAPI:
         header_name=settings.log_correlation_header,
         log_request_body=settings.log_request_body,
         log_redact_secrets=settings.log_redact_secrets,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
     )
     app.include_router(build_api_router(api_prefix=settings.api_prefix))
     return app
