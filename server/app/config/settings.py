@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     dialogue_max_clarify_turns: int = Field(default=3, alias="DIALOGUE_MAX_CLARIFY_TURNS")
     grounding_min_citations: int = Field(default=1, alias="GROUNDING_MIN_CITATIONS")
     grounding_min_score: float = Field(default=0.0, alias="GROUNDING_MIN_SCORE")
+    # Extra in-domain topics beyond corporate regulations (labels / label=description).
+    # Used by off-topic heuristic, classify prompt, and refusal text. Docs must be ingested.
+    allowed_topics: str | None = Field(default=None, alias="ALLOWED_TOPICS")
 
     # --- abbreviation glossary (query expand + optional ingest metadata) ---
     # Empty ABBREVIATION_GLOSSARY / PATH → built-in corporate default list.
@@ -158,6 +161,12 @@ class Settings(BaseSettings):
         if not self.egress_allow_hosts:
             return set()
         return {h.strip().lower() for h in self.egress_allow_hosts.split(",") if h.strip()}
+
+    def resolved_allowed_topics(self):
+        """Core corporate topic + extras from ALLOWED_TOPICS."""
+        from app.domain.allowed_topics import resolve_allowed_topics
+
+        return resolve_allowed_topics(self.allowed_topics)
 
 
 @lru_cache

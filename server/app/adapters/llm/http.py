@@ -24,6 +24,11 @@ import httpx
 
 from app.adapters.llm.port import LLMClient
 from app.application.text_util import strip_think_blocks
+from app.domain.allowed_topics import (
+    AllowedTopic,
+    format_topics_for_prompt,
+    resolve_allowed_topics,
+)
 from app.domain.errors import AppError, UpstreamTimeoutError
 
 # Re-export for existing imports (tests / callers).
@@ -76,6 +81,7 @@ class HttpLLMClient:
         max_tokens: int = 1500,
         reasoning_tokens: int = 0,
         allow_hosts: set[str] | None = None,
+        allowed_topics: list[AllowedTopic] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
@@ -85,6 +91,7 @@ class HttpLLMClient:
         self._max_tokens = max_tokens
         self._reasoning_tokens = max(0, int(reasoning_tokens))
         self._allow_hosts = allow_hosts or set()
+        self._allowed_topics = list(allowed_topics) if allowed_topics is not None else resolve_allowed_topics()
         self._assert_host_allowed()
 
     @property
@@ -154,17 +161,22 @@ class HttpLLMClient:
         self, user_message: str, history: list[str] | None = None
     ) -> str:
         hist = "\n".join(history or [])
+        topics_block = format_topics_for_prompt(self._allowed_topics)
         prompt = (
             "Classify the user question as one of: "
             "underspecified, ambiguous, specific, off_topic.\n"
+            "In-domain topics (NOT off_topic when the question is about them):\n"
+            f"{topics_block}\n"
             "Rules:\n"
-            "- off_topic: chitchat or non-regulation asks "
+            "- off_topic: chitchat or asks outside the in-domain topics above "
             "(e.g. сколько времени, какая погода, расскажи анекдот). "
-            "Only for questions outside corporate regulations/processes.\n"
+            "Do NOT label as off_topic questions about any listed in-domain topic "
+            "(including Конституция РФ / Трудовой кодекс РФ when configured).\n"
             "- specific: asks who/what for a concrete role+topic "
             "(e.g. кто отвечает за организацию отчётности по проекту, "
-            "кто подписывает договоры на закупку). Prefer specific when both "
-            "a role-seeking cue and a concrete topic are present.\n"
+            "кто подписывает договоры на закупку) OR a concrete ask about an "
+            "in-domain legal/regulatory document that was ingested. Prefer specific "
+            "when both a role-seeking cue and a concrete topic are present.\n"
             "- ambiguous: could map to two+ distinct regulation scopes "
             "(e.g. кто подписывает договоры — закупка vs подряд).\n"
             "- underspecified: missing topic or too vague to retrieve "
