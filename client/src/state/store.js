@@ -64,6 +64,8 @@ const initialState = {
   chatMessages: savedChat,
   sessions: savedSessions,
   chatLoading: false,
+  /** Session ids with an in-flight assistant request (survives navigate-away). */
+  pendingSessionIds: [],
   tickets: [],
   selectedTicketId: null,
   ticketFilter: 'all', // 'all' | 'open' | 'resolved' | 'answered' | 'in_progress'
@@ -131,6 +133,82 @@ class Store {
     });
   }
 
+  isSessionPending(sessionId) {
+    if (!sessionId) return false;
+    return (this.state.pendingSessionIds || []).includes(sessionId);
+  }
+
+  markSessionPending(sessionId) {
+    if (!sessionId) return;
+    const pending = this.state.pendingSessionIds || [];
+    const next = pending.includes(sessionId) ? pending : [...pending, sessionId];
+    this.setState({
+      pendingSessionIds: next,
+      chatLoading: next.includes(this.state.sessionId)
+    });
+  }
+
+  clearSessionPending(sessionId) {
+    if (!sessionId) return;
+    const pending = (this.state.pendingSessionIds || []).filter((id) => id !== sessionId);
+    this.setState({
+      pendingSessionIds: pending,
+      chatLoading: pending.includes(this.state.sessionId)
+    });
+  }
+
+  getSessionMessages(sessionId) {
+    if (!sessionId) return [];
+    if (sessionId === this.state.sessionId) {
+      return this.state.chatMessages || [];
+    }
+    const session = (this.state.sessions || []).find((s) => s.session_id === sessionId);
+    return session?.messages || [];
+  }
+
+  /**
+   * Persist messages for a specific session (active or background).
+   * Keeps the in-flight answer attached to the appeal that asked, even after navigate-away.
+   */
+  saveSessionMessages(sessionId, newMessages) {
+    if (!sessionId) return;
+    const sessions = [...this.state.sessions];
+    const index = sessions.findIndex((s) => s.session_id === sessionId);
+    const firstUserMsg = (newMessages || []).find((m) => m.role === 'user');
+    const autoTitle = firstUserMsg ? firstUserMsg.content.slice(0, 45) : 'Новый диалог';
+
+    if (index >= 0) {
+      sessions[index] = {
+        ...sessions[index],
+        title:
+          sessions[index].title && sessions[index].title !== 'Новый диалог'
+            ? sessions[index].title
+            : autoTitle,
+        updated_at: new Date().toISOString(),
+        messages: newMessages,
+        appeal_status:
+          sessionId === this.state.sessionId
+            ? this.state.appealStatus
+            : sessions[index].appeal_status
+      };
+    } else {
+      sessions.unshift({
+        session_id: sessionId,
+        title: autoTitle,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        messages: newMessages,
+        appeal_status: sessionId === this.state.sessionId ? this.state.appealStatus : null
+      });
+    }
+
+    const partial = { sessions };
+    if (sessionId === this.state.sessionId) {
+      partial.chatMessages = newMessages;
+    }
+    this.setState(partial);
+  }
+
   /**
    * Переключение на ранее сохранённую сессию из истории
    * @param {string} sessionId 
@@ -138,11 +216,12 @@ class Store {
   switchSession(sessionId) {
     const session = this.state.sessions.find((s) => s.session_id === sessionId);
     if (session) {
+      const pending = this.isSessionPending(session.session_id);
       this.setState({
         sessionId: session.session_id,
         appealStatus: session.appeal_status || null,
         chatMessages: session.messages || [],
-        chatLoading: false
+        chatLoading: pending
       });
     }
   }
@@ -171,10 +250,19 @@ class Store {
       }
       return s;
     });
+    const pendingSessionIds = (this.state.pendingSessionIds || []).map((id) =>
+      id === oldId ? newId : id
+    );
+    const nextSessionId = this.state.sessionId === oldId ? newId : this.state.sessionId;
     this.setState({
-      sessionId: newId,
-      appealStatus: appealStatus || this.state.appealStatus,
-      sessions
+      sessionId: nextSessionId,
+      appealStatus:
+        this.state.sessionId === oldId
+          ? appealStatus || this.state.appealStatus
+          : this.state.appealStatus,
+      sessions,
+      pendingSessionIds,
+      chatLoading: pendingSessionIds.includes(nextSessionId)
     });
   }
 

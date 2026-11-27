@@ -135,6 +135,18 @@ class AbbreviationGlossary:
         escaped = [re.escape(k) for k in keys]
         return re.compile(rf"(?iu)(?<!\w)({'|'.join(escaped)})(?!\w)")
 
+    @staticmethod
+    def _case_compatible(key: str, raw: str) -> bool:
+        """
+        Uppercase-only glossary keys (ПО, РП, ТЗ) must not match lowercase
+        prepositions/particles (по, на, …).
+        """
+        if key.casefold() != raw.casefold():
+            return False
+        if key.isupper() and key.isalpha() and not any(ch.isupper() for ch in raw):
+            return False
+        return True
+
     def find_matches(self, text: str) -> dict[str, str]:
         """Return abbr→expansion for abbreviations present in text."""
         pat = self._matcher()
@@ -145,7 +157,7 @@ class AbbreviationGlossary:
             raw = m.group(1)
             # Preserve configured casing key.
             for key, exp in self.entries.items():
-                if key.casefold() == raw.casefold():
+                if self._case_compatible(key, raw):
                     found[key] = exp
                     break
         return found
@@ -173,6 +185,35 @@ class AbbreviationGlossary:
         if not self.expand_query or not text:
             return text
         return self._append_expansions(text)
+
+    def display_enabled(self) -> bool:
+        """True when any ABBREVIATION_* feature is on and glossary has entries."""
+        return bool(self.entries) and (self.expand_query or self.enrich_ingest)
+
+    def expand_for_display(self, text: str) -> str:
+        """
+        User-facing answer text: replace known abbr with ``ABBR (expansion)`` once.
+
+        Active when query-expand or ingest-enrich is enabled (ABBREVIATION_*).
+        Skips tokens whose expansion is already present in the text.
+        """
+        if not self.display_enabled() or not text:
+            return text
+        pat = self._matcher()
+        if not pat:
+            return text
+
+        def _repl(match: re.Match[str]) -> str:
+            raw = match.group(1)
+            for key, exp in self.entries.items():
+                if not self._case_compatible(key, raw):
+                    continue
+                if exp.lower() in text.lower():
+                    return raw
+                return f"{key} ({exp})"
+            return raw
+
+        return pat.sub(_repl, text)
 
     def enrich_text(self, text: str) -> str:
         """

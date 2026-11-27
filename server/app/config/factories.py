@@ -182,6 +182,7 @@ def build_container(settings: Settings | None = None) -> Container:
     grounding = GroundingService(
         min_citations=settings.grounding_min_citations,
         min_score=settings.grounding_min_score,
+        glossary=glossary,
     )
     quality = QualityEscalationService(
         persistence=persistence,

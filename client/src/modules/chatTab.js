@@ -366,21 +366,31 @@ export class ChatTab {
         if (sid && sid !== store.getState().sessionId) {
           store.switchSession(sid);
 
-          // Если в режиме API и это серверный UUID, подтягиваем актуальные сообщения
+          // Если в режиме API и это серверный UUID, подтягиваем актуальные сообщения.
+          // Keep local pending loader if this appeal still awaits an in-flight reply.
           if (store.getState().mode === 'api' && isServerAppealId(sid)) {
             try {
               const [res, appeal] = await Promise.all([
                 apiClient.getAppealMessages(sid),
                 apiClient.getAppeal(sid).catch(() => null)
               ]);
+              const stillPending = store.isSessionPending(sid);
               if (res && res.items && res.items.length > 0) {
-                store.setState({ chatMessages: res.items });
+                store.setState({
+                  chatMessages: res.items,
+                  chatLoading: stillPending
+                });
+              } else if (stillPending) {
+                store.setState({ chatLoading: true });
               }
               if (appeal && appeal.status) {
                 store.setAppealStatus(appeal.status);
               }
             } catch (err) {
               console.warn('Не удалось загрузить историю с сервера, используется локальный кэш:', err);
+              if (store.isSessionPending(sid)) {
+                store.setState({ chatLoading: true });
+              }
             }
           }
         }
@@ -717,6 +727,7 @@ export class ChatTab {
       return;
     }
 
+    const requestSessionId = state.sessionId;
     const userMsg = {
       id: Date.now(),
       role: 'user',
@@ -733,14 +744,12 @@ export class ChatTab {
     }));
 
     store.saveActiveSessionMessages(newMessages);
-    store.setState({
-      chatLoading: true
-    });
+    store.markSessionPending(requestSessionId);
 
     try {
       const response = await apiClient.sendChatMessage({
         question,
-        session_id: store.getState().sessionId,
+        session_id: requestSessionId,
         history: historyPayload
       });
 
@@ -756,11 +765,18 @@ export class ChatTab {
         timestamp: new Date().toISOString()
       };
 
-      // sessionId may already be remapped to the server appeal UUID by apiClient
-      store.saveActiveSessionMessages([...newMessages, assistantMsg]);
-      store.setState({ chatLoading: false });
+      // Prefer server appeal id (may have remapped local sess-* → UUID while in flight).
+      const targetSessionId = response.appeal_id || requestSessionId;
+      const baseMessages = store.getSessionMessages(targetSessionId);
+      const messagesForSave =
+        baseMessages && baseMessages.length > 0 ? baseMessages : newMessages;
+      store.saveSessionMessages(targetSessionId, [...messagesForSave, assistantMsg]);
+      store.clearSessionPending(targetSessionId);
+      if (targetSessionId !== requestSessionId) {
+        store.clearSessionPending(requestSessionId);
+      }
     } catch (err) {
-      store.setState({ chatLoading: false });
+      store.clearSessionPending(requestSessionId);
       if (err.status === 409 || err.code === 'CONFLICT_STATUS') {
         store.setAppealStatus('closed');
         toastError('Обращение закрыто. Начните новый диалог.');

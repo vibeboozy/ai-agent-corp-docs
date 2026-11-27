@@ -19,6 +19,7 @@ from typing import Any
 from uuid import UUID
 
 from app.adapters.persistence.port import Persistence
+from app.application.dialogue.answer_format import summary_from_answer
 from app.application.dialogue.audit import build_dialogue_turn_audit
 from app.application.dialogue.graph import build_dialogue_graph
 from app.application.dialogue.nodes import DialogueDeps
@@ -145,7 +146,7 @@ class DialogueService:
             appeal = await self._persistence.update_appeal(
                 appeal_id,
                 status=AppealStatus.ANSWERED,
-                summary=truncate_at_sentence(answer_text, 480),
+                summary=summary_from_answer(answer_text, 480),
             )
             new_messages.append(assistant)
         else:

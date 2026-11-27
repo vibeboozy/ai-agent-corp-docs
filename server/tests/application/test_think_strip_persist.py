@@ -132,6 +132,6 @@ async def test_first_answer_persists_stripped_content_and_summary() -> None:
     assert "</think>" not in content.lower()
     assert "<think>" not in (summary or "").lower()
     assert "руководитель проекта" in content
-    assert "руководитель проекта" in (summary or "")
+    assert "уководитель проекта" in (summary or "").lower()
     # Summary derived from the same cleaned answer text.
     assert summary == content or (summary or "") in content
