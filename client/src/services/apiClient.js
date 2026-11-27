@@ -3,6 +3,8 @@ import { mockService } from './mockService.js';
 import { CONFIG } from '../config.js';
 import {
   APPEALS_LIST_LIMIT,
+  attachEscalationEmailDrafts,
+  buildEscalationEmailDraft,
   isServerAppealId,
   mapAppealStatusToTicketStatus,
   resolveEmployeeQuestion
@@ -222,15 +224,8 @@ class ApiClient {
       }))
     );
 
-    let email_draft = null;
-    if (status === 'escalate') {
-      email_draft = {
-        to: 'quality@company.ru',
-        subject: `Запрос разъяснения регламента: ${question.slice(0, 45)}...`,
-        body:
-          `Здравствуйте!\n\nПрошу предоставить официальное разъяснение по вопросу:\n«${question}»\n\nС уважением,\nСотрудник отдела сопровождения`
-      };
-    }
+    // Draft is client-only (not on Message DTO) — same helper as history reload.
+    const email_draft = status === 'escalate' ? buildEscalationEmailDraft(question) : null;
 
     const appealId = appeal.id ? String(appeal.id) : sessionId;
     if (appeal.id && String(appeal.id) !== sessionId) {
@@ -489,7 +484,7 @@ class ApiClient {
       const history = mockService.getHistory();
       return {
         appeal_id: appealId,
-        items: history
+        items: attachEscalationEmailDrafts(history || [])
       };
     }
 
@@ -498,37 +493,41 @@ class ApiClient {
     });
 
     const items = data.items || [];
+    // email_draft is not stored on the server — recompute for escalate so the
+    // «Превью запроса в Службу качества» form survives leave/return.
+    const mapped = items.map((m) => {
+      let status = 'answer';
+      if (m.message_kind === 'clarification') {
+        status = 'clarify';
+      } else if (m.message_kind === 'escalation_notice') {
+        status = 'escalate';
+      } else if (m.message_kind === 'refusal') {
+        status = 'refusal';
+      }
+
+      const citations = dedupeCitations(
+        (m.citations || []).map((c) => ({
+          doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
+          section: c.locator || '',
+          quote: c.quote || '',
+          chunk_id: c.chunk_id || ''
+        }))
+      );
+
+      return {
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        status,
+        message_kind: m.message_kind,
+        citations,
+        timestamp: m.created_at || new Date().toISOString()
+      };
+    });
+
     return {
       appeal_id: data.appeal_id || appealId,
-      items: items.map((m) => {
-        let status = 'answer';
-        if (m.message_kind === 'clarification') {
-          status = 'clarify';
-        } else if (m.message_kind === 'escalation_notice') {
-          status = 'escalate';
-        } else if (m.message_kind === 'refusal') {
-          status = 'refusal';
-        }
-
-        const citations = dedupeCitations(
-          (m.citations || []).map((c) => ({
-            doc_name: c.document_title || c.document_id || 'Корпоративный регламент',
-            section: c.locator || '',
-            quote: c.quote || '',
-            chunk_id: c.chunk_id || ''
-          }))
-        );
-
-        return {
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          status,
-          message_kind: m.message_kind,
-          citations,
-          timestamp: m.created_at || new Date().toISOString()
-        };
-      })
+      items: attachEscalationEmailDrafts(mapped)
     };
   }
 }

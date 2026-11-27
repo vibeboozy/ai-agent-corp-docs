@@ -3,7 +3,12 @@ import { apiClient } from '../services/apiClient.js';
 import { DEMO_PROMPTS } from '../config.js';
 import { escapeHtml, formatTextWithLineBreaks, formatTimeShort, formatSessionDate, autoResizeTextarea } from '../utils/dom.js';
 import { toastSuccess, toastError } from '../utils/toast.js';
-import { canSendInAppeal, isServerAppealId } from '../utils/appealHelpers.js';
+import {
+  canSendInAppeal,
+  isServerAppealId,
+  mergeLocalEscalationState,
+  shouldShowEscalationPreviewForm
+} from '../utils/appealHelpers.js';
 import { dedupeCitations } from '../utils/citations.js';
 
 export class ChatTab {
@@ -240,10 +245,11 @@ export class ChatTab {
       this.renderAppealStatusBanner(newState.appealStatus);
     }
 
-    // Если изменился список сообщений или состояние загрузки - обновляем ленту
+    // Лента: сообщения, лоадер, или статус appeal (скрытие формы СК после resolve)
     if (
       newState.chatMessages !== prevState.chatMessages ||
-      newState.chatLoading !== prevState.chatLoading
+      newState.chatLoading !== prevState.chatLoading ||
+      newState.appealStatus !== prevState.appealStatus
     ) {
       this.renderMessages(newState.chatMessages, newState.chatLoading);
     }
@@ -373,16 +379,18 @@ export class ChatTab {
           // Keep local pending loader if this appeal still awaits an in-flight reply.
           if (store.getState().mode === 'api' && isServerAppealId(sid)) {
             try {
+              // Capture local escalate form / ticketCreated before server overwrite.
+              const localMessages = store.getSessionMessages(sid);
               const [res, appeal] = await Promise.all([
                 apiClient.getAppealMessages(sid),
                 apiClient.getAppeal(sid).catch(() => null)
               ]);
               const stillPending = store.isSessionPending(sid);
               if (res && res.items && res.items.length > 0) {
-                store.setState({
-                  chatMessages: res.items,
-                  chatLoading: stillPending
-                });
+                const merged = mergeLocalEscalationState(res.items, localMessages);
+                // Persist into sessions[] so leave/return keeps the preview form.
+                store.saveSessionMessages(sid, merged);
+                store.setState({ chatLoading: stillPending });
               } else if (stillPending) {
                 store.setState({ chatLoading: true });
               }
@@ -557,7 +565,8 @@ export class ChatTab {
       `;
     }
 
-    // Карточка превью письма при эскалации (Кейс 3)
+    // Карточка превью письма при эскалации (Кейс 3).
+    // email_draft is recomputed on history reload; form visibility follows appeal status.
     let emailDraftHtml = '';
     if (msg.status === 'escalate') {
       if (msg.ticketCreated) {
@@ -572,7 +581,7 @@ export class ChatTab {
             </div>
           </div>
         `;
-      } else if (msg.email_draft) {
+      } else if (shouldShowEscalationPreviewForm(msg, store.getState().appealStatus)) {
         const draft = msg.email_draft;
         emailDraftHtml = `
           <div class="email-draft-card" data-msg-id="${msg.id}">
