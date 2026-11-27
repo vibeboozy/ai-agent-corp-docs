@@ -10,6 +10,7 @@ from app.application.text_util import (
     complete_sentences,
     cut_before_next_clause,
     lexical_overlap,
+    lexical_relevance,
     quote_at_boundary,
     strip_think_blocks,
     truncate_at_sentence,
@@ -113,3 +114,12 @@ def test_lexical_overlap_prefers_matching_section() -> None:
     good = "7.2. Планирование поставок. За планирование поставок отвечает Менеджер."
     bad = "17.3. Исполнители команды проекта выполняют работы по план-графику."
     assert lexical_overlap(q, good) > lexical_overlap(q, bad)
+
+
+def test_lexical_relevance_handles_ru_morphology() -> None:
+    q = "процент пороговой маржинальности в Дирекции"
+    good = "Пороговая маржинальность Дирекции составляет пятнадцать процентов."
+    bad = "Согласование Директора по бюджету подразделения."
+    assert lexical_relevance(q, good) > lexical_relevance(q, bad)
+    assert lexical_relevance(q, good) >= 0.12
+
