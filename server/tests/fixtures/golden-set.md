@@ -18,7 +18,7 @@ python scripts/run_golden_scenarios.py
 Сценарии: `scenarios/golden-set.yaml`. Лог для вставки обратно: **`artifacts/golden-run.log`**
 (блоки `GOLDEN LOG` → поля `log (paste back)` ниже).
 
-**Баланс:** 16 кейсов — answer 7 · clarify 3 · escalate 3 · refuse 3.
+**Баланс:** 17 кейсов — answer 8 · clarify 3 · escalate 3 · refuse 3.
 
 ---
 
@@ -32,6 +32,24 @@ python scripts/run_golden_scenarios.py
 - **locator:** п. 1.5
 - **quote_snippet:** «Заявка должна быть инициирована не менее чем за 3 рабочих дня до подачи предложения Заказчику.»
 - **notes / traps:** lead-time WHEN; не проигрывать Presale IB 3.4/6.9 (wait/timeout «3 рабочих дня» / дисквалификация) — prefer initiation clause п.1.5 даже при score~0.33; риск `paraphrase_required` если 1.5 отфильтрован topical_floor.
+- **log (paste back):**
+  - status:
+  - summary/answer:
+  - citations (doc, locator, score):
+  - escalation reason:
+
+---
+
+## GS-01b · answer · DBRCT пресейл 3 р.д. (near-dup «в ДБРЦТ»)
+
+- **id:** `GS-01b`
+- **scenario:** `answer`
+- **question:** За сколько рабочих дней необходимо инициировать заявку на пресейл в ДБРЦТ?
+- **expected_behavior:** Тот же ground truth, что GS-01 — не менее чем за 3 рабочих дня (п. 1.5).
+- **expected_doc:** Проектная деятельность ДБРЦТ (Департамента бизнес-решений и цифровой трансформации)
+- **locator:** п. 1.5
+- **quote_snippet:** «Заявка должна быть инициирована не менее чем за 3 рабочих дня до подачи предложения Заказчику.»
+- **notes / traps:** единственное отличие от GS-01 — предлог «в» перед ДБРЦТ. Live: hybrid/rerank уводил в Presale IB 3.4/6.9 (wait/timeout), 1.5 почти не в top → `paraphrase_required` / grounded=false. Fix: lead-time synonym expand + deterministic blend (boost initiation, demote wait, org-title ДБРЦТ); grounding escalate если в пуле только wait/timeout.
 - **log (paste back):**
   - status:
   - summary/answer:
@@ -315,6 +333,7 @@ python scripts/run_golden_scenarios.py
 | id | scenario | короткий фокус |
 |---|---|---|
 | GS-01 | answer | ДБРЦТ пресейл ≥ 3 р.д. |
+| GS-01b | answer | ДБРЦТ пресейл «в ДБРЦТ» near-dup |
 | GS-02 | answer | закупка → юр. лица, п. 9.5 |
 | GS-03 | answer | WHEN RP Q1 (Координатор / Расчёт) |
 | GS-04 | answer | WHEN RP Q2 near-dup |

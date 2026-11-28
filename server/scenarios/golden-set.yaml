@@ -13,6 +13,17 @@ cases:
     expected_doc: Проектная деятельность ДБРЦТ
     locator: п. 1.5
 
+  # Near-duplicate of GS-01: only the preposition «в» before ДБРЦТ.
+  # Live bug: hybrid+LLM steered to Presale IB 3.4/6.9 → escalate paraphrase_required.
+  - id: GS-01b
+    scenario: answer
+    question: За сколько рабочих дней необходимо инициировать заявку на пресейл в ДБРЦТ?
+    expected_behavior: >-
+      Same ground truth as GS-01 (п. 1.5, ≥3 рабочих дня). Must not diverge to
+      Presale IB wait/timeout or escalate paraphrase_required just because of «в».
+    expected_doc: Проектная деятельность ДБРЦТ
+    locator: п. 1.5
+
   - id: GS-02
     scenario: answer
     question: Кто подписывает договоры на закупку?

@@ -39,7 +39,7 @@ def golden_set_path() -> Path:
 
 
 def load_golden_cases(path: Path | None = None) -> list[GoldenCase]:
-    """Load GS-01…GS-16 from the markdown fixture."""
+    """Load GS-01…GS-16 (+ sibling ids like GS-01b) from the markdown fixture."""
     text = (path or _FIXTURE_PATH).read_text(encoding="utf-8")
     blocks = re.split(r"(?m)^## GS-", text)
     cases: list[GoldenCase] = []

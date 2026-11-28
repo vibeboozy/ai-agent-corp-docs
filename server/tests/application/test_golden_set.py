@@ -1,6 +1,6 @@
 """
 ANCHOR: tests.application.test_golden_set
-PURPOSE: Offline coverage of server/tests/fixtures/golden-set.md (GS-01…GS-16).
+PURPOSE: Offline coverage of server/tests/fixtures/golden-set.md (GS-01…GS-16 + GS-01b).
 Dependencies: dialogue graph; GroundingService; Fake LLM/embeddings/vectorstore
 DONT: live Qdrant / network — retrieval hits are fixtures from corpus quotes.
 """
@@ -269,14 +269,15 @@ def _graph(
 
 
 def _parse_golden_ids(text: str) -> list[str]:
-    return re.findall(r"\*\*id:\*\*\s*`?(GS-\d+)`?", text)
+    return re.findall(r"\*\*id:\*\*\s*`?(GS-\d+[a-z]?)`?", text)
 
 
-def test_golden_set_fixture_lists_all_sixteen_cases() -> None:
+def test_golden_set_fixture_lists_all_cases() -> None:
     assert _FIXTURE.is_file(), f"missing fixture {_FIXTURE}"
     text = _FIXTURE.read_text(encoding="utf-8")
     ids = _parse_golden_ids(text)
-    assert ids == [f"GS-{i:02d}" for i in range(1, 17)]
+    expected = ["GS-01", "GS-01b"] + [f"GS-{i:02d}" for i in range(2, 17)]
+    assert ids == expected
     for scenario in ("answer", "clarify", "escalate", "refuse"):
         assert f"· {scenario} ·" in text or f"scenario:** `{scenario}`" in text
 
@@ -327,10 +328,15 @@ _HIT_DS_AM_207 = {
 }
 
 
-def test_gs01_dbrct_presale_three_working_days() -> None:
-    q = (
-        "За сколько рабочих дней необходимо инициировать заявку на пресейл ДБРЦТ?"
-    )
+@pytest.mark.parametrize(
+    "q",
+    [
+        "За сколько рабочих дней необходимо инициировать заявку на пресейл ДБРЦТ?",
+        # GS-01b: only «в» before ДБРЦТ — must not diverge.
+        "За сколько рабочих дней необходимо инициировать заявку на пресейл в ДБРЦТ?",
+    ],
+)
+def test_gs01_dbrct_presale_three_working_days(q: str) -> None:
     # Rival Presale wait/timeout hits outrank by raw score/lex — must still pick 1.5.
     result = _grounding().ground(
         candidates=[
@@ -346,6 +352,21 @@ def test_gs01_dbrct_presale_three_working_days() -> None:
     assert "3" in (result.answer_text or "")
     assert "рабоч" in (result.answer_text or "").lower()
     assert "1.5" in (result.answer_text or "")
+
+
+def test_gs01b_wait_only_pool_escalates_not_false_ib_answer() -> None:
+    """Without DBRCT 1.5, do not answer «в течение 3 р.д.» from Presale IB 3.4."""
+    q = (
+        "За сколько рабочих дней необходимо инициировать заявку на пресейл в ДБРЦТ?"
+    )
+    result = _grounding().ground(
+        candidates=[_HIT_PRESALE_WAIT_34, _HIT_PRESALE_WAIT_69],
+        draft=None,
+        query=q,
+    )
+    assert result.ok is False
+    assert result.reason == "irrelevant_citations"
+    assert result.answer_text is None
 
 
 def test_gs02_purchase_signer_not_checklist_junk() -> None:

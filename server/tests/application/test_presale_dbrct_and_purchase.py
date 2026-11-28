@@ -11,6 +11,8 @@ Bugs:
 
 from __future__ import annotations
 
+import pytest
+
 from app.application.dialogue.answer_format import (
     extract_short_paraphrase,
     enforce_short_paraphrase,
@@ -20,6 +22,9 @@ from app.domain.glossary import AbbreviationGlossary
 
 
 _DBRCT_Q = "За сколько рабочих дней необходимо инициировать заявку на пресейл ДБРЦТ?"
+_DBRCT_Q_V = (
+    "За сколько рабочих дней необходимо инициировать заявку на пресейл в ДБРЦТ?"
+)
 _DBRCT_CLAUSE = (
     "1.5. Заявка должна быть инициирована не менее чем за 3 рабочих дня "
     "до подачи предложения Заказчику. При невыполнении сроков Заявка отклоняется "
@@ -70,8 +75,11 @@ def test_ground_dbrct_presale_lead_time_without_draft() -> None:
     assert "1.5" in result.answer_text
 
 
-def test_ground_dbrct_prefers_15_over_presale_wait_timeout_neighbors() -> None:
-    """Kirill GS-01: DBRCT 1.5 must win over Presale IB 3.4/6.9 wait/timeout hits."""
+@pytest.mark.parametrize("query", [_DBRCT_Q, _DBRCT_Q_V])
+def test_ground_dbrct_prefers_15_over_presale_wait_timeout_neighbors(
+    query: str,
+) -> None:
+    """Kirill GS-01 / GS-01b: DBRCT 1.5 must win over Presale IB 3.4/6.9 wait/timeout."""
     svc = GroundingService(
         min_citations=1,
         min_score=0.25,
@@ -117,7 +125,7 @@ def test_ground_dbrct_prefers_15_over_presale_wait_timeout_neighbors() -> None:
             },
         ],
         draft=None,
-        query=_DBRCT_Q,
+        query=query,
     )
     assert result.ok is True, result
     assert result.citations[0]["chunk_id"] == "c15"
